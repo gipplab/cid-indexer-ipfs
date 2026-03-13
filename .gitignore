@@ -1,0 +1,6 @@
+.api_key
+keyword_index.json
+keyword_failures.json
+cids.txt
+cidindexer-ipfs
+*.tmp

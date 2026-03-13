@@ -1,0 +1,3 @@
+module cidindexer-ipfs
+
+go 1.25.0
