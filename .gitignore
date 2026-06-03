@@ -1,6 +1,9 @@
 .api_key
 keyword_index.json
 keyword_failures.json
-cids.txt
+archives.json
+submissions.json
+denylist.json
+settings.json
 cidindexer-ipfs
 *.tmp
