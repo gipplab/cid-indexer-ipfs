@@ -81,9 +81,16 @@ type Pipeline struct {
 	chatLimiter    *rateLimiter
 }
 
-// rateLimiter is a simple token bucket shared across workers.
+// rateLimiter is a token bucket shared across workers. In addition to steady
+// pacing, it supports a global cooldown: when the server signals a rate limit
+// (HTTP 429), penalize() holds back every worker until the reset window
+// elapses, so a strictly limited endpoint actually gets a quiet window to
+// recover instead of being hammered by a stampede of independent retries.
 type rateLimiter struct {
 	tokens chan struct{}
+
+	mu         sync.Mutex
+	blockUntil time.Time
 }
 
 // newRateLimiter issues rps tokens per second, allowing a burst of up to burst
@@ -113,8 +120,37 @@ func newRateLimiter(rps, burst int) *rateLimiter {
 	return rl
 }
 
-// acquire blocks until the limiter grants a token.
-func (rl *rateLimiter) acquire() { <-rl.tokens }
+// acquire blocks until any active global cooldown has elapsed and the limiter
+// grants a token. Honoring the cooldown before taking a token means all workers
+// hold off together after a 429, then resume staggered at the bucket's refill
+// rate rather than stampeding the endpoint all at once.
+func (rl *rateLimiter) acquire() {
+	for {
+		rl.mu.Lock()
+		wait := time.Until(rl.blockUntil)
+		rl.mu.Unlock()
+		if wait <= 0 {
+			break
+		}
+		time.Sleep(wait)
+	}
+	<-rl.tokens
+}
+
+// penalize pauses the limiter (for all workers) for at least d, extending any
+// existing cooldown. Called when the server returns a rate-limit response so
+// the whole pool backs off in lockstep.
+func (rl *rateLimiter) penalize(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	until := time.Now().Add(d)
+	rl.mu.Lock()
+	if until.After(rl.blockUntil) {
+		rl.blockUntil = until
+	}
+	rl.mu.Unlock()
+}
 
 func (p *Pipeline) initLimiters() {
 	p.limiterOnce.Do(func() {
@@ -208,6 +244,9 @@ func (p *Pipeline) convertPDFWithRetry(pdfData []byte, cid string) (string, erro
 			wait := backoffDuration(rateLimitTries, retryAfter)
 			slog.Warn("rate limited on convert, backing off", "cid", cid, "attempt", rateLimitTries+1, "wait", wait)
 			rateLimitTries++
+			// Hold back the entire worker pool, not just this request, so the
+			// strictly limited convert endpoint gets a quiet window to recover.
+			p.convertLimiter.penalize(wait)
 			time.Sleep(wait)
 		case retryTransient:
 			if transientTries >= maxTransientRetries {
@@ -315,6 +354,7 @@ func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionRe
 			wait := backoffDuration(rateLimitTries, retryAfter)
 			slog.Warn("rate limited on extract, backing off", "cid", cid, "attempt", rateLimitTries+1, "wait", wait)
 			rateLimitTries++
+			p.chatLimiter.penalize(wait)
 			time.Sleep(wait)
 		case retryTransient:
 			if transientTries >= maxTransientRetries {
