@@ -1,0 +1,14 @@
+services:
+  cidindexer:
+    image: ghcr.io/gipplab/cid-indexer-ipfs:latest
+    restart: unless-stopped
+    ports:
+      - "8384:8384"
+    environment:
+      # Interpolated from the .env file next to this compose file.
+      SAIA_API_KEY: "${SAIA_API_KEY:?set SAIA_API_KEY in .env}"
+    volumes:
+      - cidindexer-data:/data
+
+volumes:
+  cidindexer-data:

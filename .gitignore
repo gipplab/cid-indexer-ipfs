@@ -1,4 +1,5 @@
 .api_key
+.env
 keyword_index.json
 keyword_failures.json
 archives.json

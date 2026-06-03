@@ -98,6 +98,54 @@ toggle).
 go build -o cidindexer-ipfs .
 ```
 
+## Docker
+
+A prebuilt image is published to GitHub Container Registry on every push to
+`main` and on version tags (`v*`):
+
+```sh
+docker pull ghcr.io/gipplab/cid-indexer-ipfs:latest
+```
+
+The container persists all state under `/data` (the image runs with
+`-o /data` by default) and listens on port `8384`. Provide the API key via the
+`SAIA_API_KEY` environment variable, or mount a `.api_key` file into `/data`.
+
+```sh
+docker run -d --name cidindexer \
+  -p 8384:8384 \
+  -e SAIA_API_KEY="your-key" \
+  -v cidindexer-data:/data \
+  ghcr.io/gipplab/cid-indexer-ipfs:latest
+```
+
+Extra flags can be appended after the image name (they are passed straight to
+the binary), e.g. `... :latest -gateway https://dweb.link -workers 12`.
+
+### docker compose
+
+```yaml
+services:
+  cidindexer:
+    image: ghcr.io/gipplab/cid-indexer-ipfs:latest
+    restart: unless-stopped
+    ports:
+      - "8384:8384"
+    environment:
+      SAIA_API_KEY: "${SAIA_API_KEY}"
+    volumes:
+      - cidindexer-data:/data
+
+volumes:
+  cidindexer-data:
+```
+
+Building the image locally instead of pulling it:
+
+```sh
+docker build -t cidindexer-ipfs .
+```
+
 ## API key
 
 An API key is required for indexing. The tool checks these locations in order:
