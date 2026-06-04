@@ -573,11 +573,6 @@ func dashboardHTML(gateway string) string {
         .page-info { font-size: 0.8em; color: #666; }
         .upload-status { margin-top: 10px; font-size: 0.85em; }
         .upload-status.err { color: #D00000; }
-        .fail-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 0.85em; }
-        .fail-main { flex: 1; min-width: 0; }
-        .fail-cid { font-family: monospace; word-break: break-all; color: #555; }
-        .fail-reason { color: #c62828; font-size: 0.9em; margin-top: 2px; word-break: break-word; }
-        .btn-retry { flex: 0 0 auto; }
         .indexing-badge { display: inline-block; background: #06A77D; color: white; padding: 2px 8px; font-size: 0.75em; text-transform: uppercase; margin-left: 8px; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
         .arch-grid { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
@@ -657,14 +652,6 @@ func dashboardHTML(gateway string) string {
                 <button class="btn btn-search" id="cidAddBtn">SUBMIT</button>
             </div>
             <div id="cidAddStatus" class="upload-status"></div>
-        </div>
-        <div class="section" id="failSection" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                <h3 style="margin:0; text-transform:uppercase; font-size:1em;">Failed Documents <span id="failCount" style="color:#c62828;"></span></h3>
-                <button class="btn" id="retryAllBtn">RETRY ALL</button>
-            </div>
-            <div style="font-size:0.8em; color:#888; margin-bottom:8px;">These CIDs failed indexing after repeated attempts. Retry to re-queue them (e.g. after raising -convert-timeout).</div>
-            <div id="failList"></div>
         </div>
     </div>
     <div id="archModal" class="modal-overlay"><div class="modal-box" id="archModalBox"></div></div>
@@ -957,7 +944,6 @@ func dashboardHTML(gateway string) string {
                     if (data.error) { archModalBox.innerHTML = '<p style="color:red;">' + esc(data.error) + '</p>'; return; }
                     var a = data.archive || {};
                     var docs = data.documents || [];
-                    var failures = data.failures || [];
                     var viewUrl = GATEWAY + '/ipfs/' + encodeURIComponent(a.cid);
                     var html = '<div class="modal-hdr"><div><div style="font-weight:700; font-size:1.1em;">' + esc(archTitle(a)) + '</div>' +
                         '<div class="arch-meta" style="margin-top:6px;">' + (a.indexed || 0) + '/' + (a.doc_count || 0) + ' docs' +
@@ -975,16 +961,6 @@ func dashboardHTML(gateway string) string {
                         return '<div class="result-item">' + title + '<div class="result-cid">' + esc(r.cid || '') + '</div><div class="result-kws">' + dkws + '</div></div>';
                     }).join('');
                     if (docs.length === 0) html += '<p style="color:#999; font-size:0.9em;">No indexed documents yet.</p>';
-                    if (failures.length) {
-                        html += '<div style="margin:14px 0 6px; text-transform:uppercase; font-size:0.85em; color:#c62828;">Failed Documents (' + failures.length + ')</div>';
-                        html += failures.map(function(f) {
-                            var furl = GATEWAY + '/ipfs/' + encodeURIComponent(f.cid);
-                            return '<div class="fail-row"><div class="fail-main">' +
-                                '<div class="fail-cid"><a href="' + furl + '" target="_blank" rel="noopener">' + esc(f.cid) + '</a></div>' +
-                                (f.reason ? '<div class="fail-reason">' + esc(f.reason) + '</div>' : '') +
-                                '</div><button class="btn btn-retry" onclick="retryDoc(\'' + escJs(f.cid) + '\', this)">RETRY</button></div>';
-                        }).join('');
-                    }
                     archModalBox.innerHTML = html;
                 })
                 .catch(function() { archModalBox.innerHTML = '<p style="color:red;">Failed to load archive.</p>'; });
@@ -1029,56 +1005,10 @@ func dashboardHTML(gateway string) string {
             if (e.key === 'Enter') submitCID();
         });
 
-        // --- Failed documents ---
-        var failSection = document.getElementById('failSection');
-        var failList = document.getElementById('failList');
-        var failCount = document.getElementById('failCount');
-        var currentFailures = [];
-
-        function loadFailures() {
-            fetch('/api/failures?t=' + Date.now())
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    currentFailures = data.failures || [];
-                    if (currentFailures.length === 0) { failSection.style.display = 'none'; return; }
-                    failSection.style.display = '';
-                    failCount.textContent = '(' + currentFailures.length + ')';
-                    failList.innerHTML = currentFailures.map(function(f) {
-                        var url = GATEWAY + '/ipfs/' + encodeURIComponent(f.cid);
-                        return '<div class="fail-row"><div class="fail-main">' +
-                            '<div class="fail-cid"><a href="' + url + '" target="_blank" rel="noopener">' + esc(f.cid) + '</a></div>' +
-                            (f.reason ? '<div class="fail-reason">' + esc(f.reason) + '</div>' : '') +
-                            '</div><button class="btn btn-retry" onclick="retryDoc(\'' + escJs(f.cid) + '\', this)">RETRY</button></div>';
-                    }).join('');
-                })
-                .catch(function() {});
-        }
-
-        function retryDoc(cid, btn) {
-            if (btn) { btn.disabled = true; btn.textContent = '...'; }
-            var fd = new FormData();
-            fd.append('cid', cid);
-            fetch('/api/retry', { method: 'POST', body: fd })
-                .then(function(r) { return r.json(); })
-                .then(function() { loadFailures(); loadStats(); })
-                .catch(function() { if (btn) { btn.disabled = false; btn.textContent = 'RETRY'; } });
-        }
-
-        document.getElementById('retryAllBtn').addEventListener('click', function() {
-            var btn = this;
-            btn.disabled = true;
-            var cids = currentFailures.map(function(f) { return f.cid; });
-            Promise.all(cids.map(function(c) {
-                var fd = new FormData(); fd.append('cid', c);
-                return fetch('/api/retry', { method: 'POST', body: fd }).catch(function() {});
-            })).then(function() { btn.disabled = false; loadFailures(); loadStats(); });
-        });
-
         loadRecent();
         loadStats();
         loadArchives();
-        loadFailures();
-        setInterval(function() { loadStats(); loadArchives(); loadFailures(); }, 5000);
+        setInterval(function() { loadStats(); loadArchives(); }, 5000);
     </script>
 </body>
 </html>`
@@ -1119,6 +1049,11 @@ func adminHTML(gateway string) string {
         .toggle-state { font-weight: 700; }
         .muted { color: #888; font-size: 0.8em; }
         .toolbar { display: flex; justify-content: space-between; align-items: center; }
+        .fail-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 0.85em; }
+        .fail-main { flex: 1; min-width: 0; }
+        .fail-cid { font-family: monospace; word-break: break-all; color: #555; }
+        .fail-reason { color: #c62828; font-size: 0.9em; margin-top: 2px; word-break: break-word; }
+        .btn-retry { flex: 0 0 auto; }
     </style>
 </head>
 <body>
@@ -1171,6 +1106,15 @@ func adminHTML(gateway string) string {
                 </div>
                 <div id="delStatus" class="status"></div>
             </div>
+
+            <div class="section">
+                <div class="toolbar">
+                    <h3 style="margin:0;">Failed Documents <span id="failCount" style="color:#c62828;"></span></h3>
+                    <button class="btn" id="retryAllBtn">RETRY ALL</button>
+                </div>
+                <div class="muted" style="margin:8px 0;">These CIDs failed indexing after repeated attempts. Retry to re-queue them (e.g. after raising -convert-timeout).</div>
+                <div id="failList"><div class="muted">No failed documents.</div></div>
+            </div>
         </div>
     </div>
     <script>
@@ -1193,6 +1137,7 @@ func adminHTML(gateway string) string {
                         adminView.style.display = '';
                         renderReviewState();
                         loadSubmissions();
+                        loadFailures();
                     } else {
                         loginSection.style.display = '';
                         adminView.style.display = 'none';
@@ -1294,6 +1239,51 @@ func adminHTML(gateway string) string {
                 .catch(function() { st.className = 'status err'; st.textContent = 'Remove failed'; });
         }
 
+        // --- Failed documents ---
+        var currentFailures = [];
+
+        function loadFailures() {
+            fetch('/api/failures?t=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    currentFailures = data.failures || [];
+                    document.getElementById('failCount').textContent = currentFailures.length ? '(' + currentFailures.length + ')' : '';
+                    var list = document.getElementById('failList');
+                    if (currentFailures.length === 0) {
+                        list.innerHTML = '<div class="muted">No failed documents.</div>';
+                        return;
+                    }
+                    list.innerHTML = currentFailures.map(function(f) {
+                        var url = GATEWAY + '/ipfs/' + encodeURIComponent(f.cid);
+                        return '<div class="fail-row"><div class="fail-main">' +
+                            '<div class="fail-cid"><a href="' + url + '" target="_blank" rel="noopener">' + esc(f.cid) + '</a></div>' +
+                            (f.reason ? '<div class="fail-reason">' + esc(f.reason) + '</div>' : '') +
+                            '</div><button class="btn btn-retry" onclick="retryDoc(\'' + escJs(f.cid) + '\', this)">RETRY</button></div>';
+                    }).join('');
+                })
+                .catch(function() {});
+        }
+
+        function retryDoc(cid, btn) {
+            if (btn) { btn.disabled = true; btn.textContent = '...'; }
+            var fd = new FormData();
+            fd.append('cid', cid);
+            fetch('/api/retry', { method: 'POST', body: fd })
+                .then(function(r) { return r.json(); })
+                .then(function() { loadFailures(); })
+                .catch(function() { if (btn) { btn.disabled = false; btn.textContent = 'RETRY'; } });
+        }
+
+        document.getElementById('retryAllBtn').addEventListener('click', function() {
+            var btn = this;
+            btn.disabled = true;
+            var cids = currentFailures.map(function(f) { return f.cid; });
+            Promise.all(cids.map(function(c) {
+                var fd = new FormData(); fd.append('cid', c);
+                return fetch('/api/retry', { method: 'POST', body: fd }).catch(function() {});
+            })).then(function() { btn.disabled = false; loadFailures(); });
+        });
+
         document.getElementById('loginBtn').addEventListener('click', login);
         document.getElementById('keyInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') login(); });
         document.getElementById('logoutBtn').addEventListener('click', logout);
@@ -1303,7 +1293,7 @@ func adminHTML(gateway string) string {
         document.getElementById('delDocBtn').addEventListener('click', function() { removeContent('document', 'delDocCid'); });
 
         checkSession();
-        setInterval(function() { if (adminView.style.display !== 'none') loadSubmissions(); }, 5000);
+        setInterval(function() { if (adminView.style.display !== 'none') { loadSubmissions(); loadFailures(); } }, 5000);
     </script>
 </body>
 </html>`

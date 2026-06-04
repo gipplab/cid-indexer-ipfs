@@ -6,6 +6,16 @@ services:
       - "8384:8384"
     environment:
       SAIA_API_KEY: "your-key-here"
+    # Conservative throughput so the strictly rate-limited SAIA endpoints
+    # (especially /chat/completions, which has a token/request quota) are not
+    # overrun. Raise these only if you confirm headroom; lower -max-text first
+    # if you hit token-per-minute limits, since it directly cuts tokens/request.
+    command:
+      - "-o=/data"
+      - "-workers=3"
+      - "-convert-rps=2"
+      - "-rps=1"
+      - "-max-text=8000"
     volumes:
       - cidindexer-data:/data
 

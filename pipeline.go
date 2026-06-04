@@ -169,10 +169,12 @@ func (p *Pipeline) initLimiters() {
 		if chatRPS <= 0 {
 			chatRPS = defaultChatRPS
 		}
-		// The strict convert endpoint is paced steadily (burst of 1) so a pool
-		// of workers can't stampede it; the chat endpoint allows a small burst.
+		// Both endpoints are paced steadily (burst of 1) so a pool of workers
+		// can't stampede them — especially right after a global cooldown lifts,
+		// when every blocked worker would otherwise fire at once and instantly
+		// trip the rate limit again.
 		p.convertLimiter = newRateLimiter(convertRPS, 1)
-		p.chatLimiter = newRateLimiter(chatRPS, chatRPS)
+		p.chatLimiter = newRateLimiter(chatRPS, 1)
 	})
 }
 
