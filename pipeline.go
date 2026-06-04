@@ -41,7 +41,16 @@ const (
 	maxRateLimitRetries = 5
 	maxTransientRetries = 2 // extra attempts for 5xx / network hiccups
 	baseBackoff         = 2 * time.Second
-	maxBackoff          = 60 * time.Second // hard ceiling on any single backoff sleep
+	maxBackoff          = 60 * time.Second // hard ceiling on a short-backoff sleep
+
+	// When the server reports a reset window longer than quotaPauseThreshold,
+	// the endpoint's quota (e.g. a daily request cap) is exhausted. Rather than
+	// re-probing a dead quota every minute, the whole worker pool pauses until
+	// the real reset and then retries, so one run can drain a large backlog
+	// across several quota windows without manual restarts.
+	quotaPauseThreshold = 2 * time.Minute
+	maxCooldown         = 24 * time.Hour // safety ceiling on a single quota pause
+	maxQuotaPauses      = 6              // give up on a CID after this many full-window pauses
 
 	keywordPrompt = `Analyze the following academic document text. Extract the following information and return ONLY a valid JSON object with these fields:
 - "title": the document title (string)
@@ -86,6 +95,33 @@ type Pipeline struct {
 	limiterOnce    sync.Once
 	convertLimiter *rateLimiter
 	chatLimiter    *rateLimiter
+
+	// Log each endpoint's rate-limit headers just once, so a sustained 429
+	// storm reveals the server's real limit/reset window without flooding logs.
+	convertRLOnce sync.Once
+	chatRLOnce    sync.Once
+}
+
+// rateLimitHeaders returns a compact summary of any rate-limit headers the
+// server sent, for diagnosing how strict (and over what window) a 429 is.
+func rateLimitHeaders(resp *http.Response) string {
+	keys := []string{
+		"Retry-After",
+		"RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset",
+		"X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset",
+		"X-Ratelimit-Limit-Requests", "X-Ratelimit-Remaining-Requests", "X-Ratelimit-Reset-Requests",
+		"X-Ratelimit-Limit-Tokens", "X-Ratelimit-Remaining-Tokens", "X-Ratelimit-Reset-Tokens",
+	}
+	var parts []string
+	for _, k := range keys {
+		if v := resp.Header.Get(k); v != "" {
+			parts = append(parts, k+"="+v)
+		}
+	}
+	if len(parts) == 0 {
+		return "(none)"
+	}
+	return strings.Join(parts, " ")
 }
 
 // rateLimiter is a token bucket shared across workers. In addition to steady
@@ -238,7 +274,7 @@ func (p *Pipeline) fetchFromIPFS(cid string) ([]byte, bool, error) {
 
 func (p *Pipeline) convertPDFWithRetry(pdfData []byte, cid string) (string, error) {
 	p.initLimiters()
-	rateLimitTries, transientTries := 0, 0
+	rateLimitTries, transientTries, quotaPauses := 0, 0, 0
 	for {
 		p.convertLimiter.acquire()
 		markdown, class, retryAfter, err := p.convertPDF(pdfData)
@@ -247,6 +283,21 @@ func (p *Pipeline) convertPDFWithRetry(pdfData []byte, cid string) (string, erro
 		}
 		switch class {
 		case retryRateLimit:
+			// A long reset means the convert quota window is exhausted (e.g. a
+			// daily cap). Pause the whole pool until the real reset and retry
+			// the same CID, instead of hammering a dead quota every minute.
+			if retryAfter > quotaPauseThreshold {
+				if quotaPauses >= maxQuotaPauses {
+					return "", fmt.Errorf("%w: %v", ErrRateLimited, err)
+				}
+				pause := capCooldown(retryAfter)
+				quotaPauses++
+				slog.Warn("convert quota exhausted, pausing pool until reset",
+					"cid", cid, "pause", pause.Round(time.Second),
+					"resume_at", time.Now().Add(pause).Format(time.RFC3339))
+				p.convertLimiter.penalize(pause)
+				continue // acquire() blocks until the cooldown lifts, then retries
+			}
 			if rateLimitTries >= maxRateLimitRetries {
 				return "", fmt.Errorf("%w: %v", ErrRateLimited, err)
 			}
@@ -306,6 +357,9 @@ func (p *Pipeline) convertPDF(pdfData []byte) (string, retryClass, time.Duration
 		return "", retryTransient, 0, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode == 429 {
+		p.convertRLOnce.Do(func() {
+			slog.Warn("convert endpoint rate-limit headers (logged once)", "headers", rateLimitHeaders(resp))
+		})
 		return "", retryRateLimit, parseRetryAfter(resp), fmt.Errorf("rate limited (429)")
 	}
 	if isServerError(resp.StatusCode) {
@@ -348,7 +402,7 @@ func (p *Pipeline) convertTimeout() time.Duration {
 
 func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionResult, error) {
 	p.initLimiters()
-	rateLimitTries, transientTries := 0, 0
+	rateLimitTries, transientTries, quotaPauses := 0, 0, 0
 	for {
 		p.chatLimiter.acquire()
 		result, class, retryAfter, err := p.extractKeywords(markdown)
@@ -357,6 +411,20 @@ func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionRe
 		}
 		switch class {
 		case retryRateLimit:
+			// Long reset = chat/extract quota exhausted; pause the pool until
+			// the real reset and retry, rather than re-probing every minute.
+			if retryAfter > quotaPauseThreshold {
+				if quotaPauses >= maxQuotaPauses {
+					return nil, fmt.Errorf("%w: %v", ErrRateLimited, err)
+				}
+				pause := capCooldown(retryAfter)
+				quotaPauses++
+				slog.Warn("extract quota exhausted, pausing pool until reset",
+					"cid", cid, "pause", pause.Round(time.Second),
+					"resume_at", time.Now().Add(pause).Format(time.RFC3339))
+				p.chatLimiter.penalize(pause)
+				continue // acquire() blocks until the cooldown lifts, then retries
+			}
 			if rateLimitTries >= maxRateLimitRetries {
 				return nil, fmt.Errorf("%w: %v", ErrRateLimited, err)
 			}
@@ -417,6 +485,9 @@ func (p *Pipeline) extractKeywords(markdown string) (*extractionResult, retryCla
 		return nil, retryTransient, 0, fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode == 429 {
+		p.chatRLOnce.Do(func() {
+			slog.Warn("chat endpoint rate-limit headers (logged once)", "headers", rateLimitHeaders(resp))
+		})
 		return nil, retryRateLimit, parseRetryAfter(resp), fmt.Errorf("rate limited (429)")
 	}
 	if isServerError(resp.StatusCode) {
@@ -452,6 +523,15 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 		}
 	}
 	return 1 * time.Second
+}
+
+// capCooldown bounds a quota-reset pause to maxCooldown, guarding against an
+// absurd or malformed Retry-After while still honoring multi-hour windows.
+func capCooldown(d time.Duration) time.Duration {
+	if d > maxCooldown {
+		return maxCooldown
+	}
+	return d
 }
 
 // backoffDuration returns an exponential backoff, using the server's
