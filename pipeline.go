@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -14,6 +15,12 @@ import (
 	"sync"
 	"time"
 )
+
+// ErrRateLimited wraps a failure that was caused solely by the server rate
+// limiting us (HTTP 429) after exhausting the retry budget. It is transient —
+// the document itself is fine — so callers should keep the CID retryable rather
+// than counting it toward the permanent-failure cap.
+var ErrRateLimited = errors.New("rate limited")
 
 const (
 	defaultModel   = "qwen3-30b-a3b-instruct-2507"
@@ -239,7 +246,7 @@ func (p *Pipeline) convertPDFWithRetry(pdfData []byte, cid string) (string, erro
 		switch class {
 		case retryRateLimit:
 			if rateLimitTries >= maxRateLimitRetries {
-				return "", err
+				return "", fmt.Errorf("%w: %v", ErrRateLimited, err)
 			}
 			wait := backoffDuration(rateLimitTries, retryAfter)
 			slog.Warn("rate limited on convert, backing off", "cid", cid, "attempt", rateLimitTries+1, "wait", wait)
@@ -349,7 +356,7 @@ func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionRe
 		switch class {
 		case retryRateLimit:
 			if rateLimitTries >= maxRateLimitRetries {
-				return nil, err
+				return nil, fmt.Errorf("%w: %v", ErrRateLimited, err)
 			}
 			wait := backoffDuration(rateLimitTries, retryAfter)
 			slog.Warn("rate limited on extract, backing off", "cid", cid, "attempt", rateLimitTries+1, "wait", wait)

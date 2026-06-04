@@ -289,6 +289,47 @@ func (s *Store) RecordFailure(cid, reason string) {
 	}
 }
 
+// RecordRateLimited notes a transient rate-limit failure for a CID without
+// incrementing its failure count. Because the count is left untouched, the CID
+// never reaches the permanent-failure cap and stays in the pending set, so it
+// is retried on the next archive run instead of being dropped just because the
+// upstream API was temporarily busy.
+func (s *Store) RecordRateLimited(cid, reason string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	f, ok := s.failures[cid]
+	if !ok {
+		f = &failureRecord{}
+		s.failures[cid] = f
+	}
+	f.LastTry = time.Now()
+	f.Reason = reason
+	s.failuresDirty.Store(true)
+}
+
+// RequeueRateLimited clears failure records that were caused by rate limiting,
+// making those CIDs pending again. This recovers documents that hit the
+// permanent-failure cap purely because the upstream API was busy (a transient
+// condition) rather than because the document is unprocessable. Returns the
+// number of records cleared. Intended to run once at startup.
+func (s *Store) RequeueRateLimited() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cleared := 0
+	for cid, f := range s.failures {
+		if strings.Contains(f.Reason, "rate limited") {
+			delete(s.failures, cid)
+			cleared++
+		}
+	}
+	if cleared > 0 {
+		s.failuresDirty.Store(true)
+	}
+	return cleared
+}
+
 // Failures returns the permanently-failed documents (those that hit the retry
 // cap), most recent attempt first.
 func (s *Store) Failures() []FailedDoc {

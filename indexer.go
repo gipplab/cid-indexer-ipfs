@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -131,6 +132,14 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 			for cid := range work {
 				entry, err := pipeline.Process(cid)
 				if err != nil {
+					// Rate-limit failures are transient (the server is busy, the
+					// document is fine), so keep the CID retryable instead of
+					// counting it toward the permanent-failure cap.
+					if errors.Is(err, ErrRateLimited) {
+						slog.Warn("rate limited, leaving CID for a later run", "cid", cid, "error", err)
+						store.RecordRateLimited(cid, err.Error())
+						continue
+					}
 					slog.Error("processing failed", "cid", cid, "error", err)
 					store.RecordFailure(cid, err.Error())
 					continue

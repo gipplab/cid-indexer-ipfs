@@ -75,6 +75,13 @@ func main() {
 
 	indexer := NewIndexer(store, cfg)
 
+	// Recover documents that were marked permanently failed only because the API
+	// was rate limiting; those are transient and should be retried rather than
+	// dropped. Done before resuming archives so the requeued CIDs are picked up.
+	if requeued := store.RequeueRateLimited(); requeued > 0 {
+		slog.Info("requeued rate-limited failures for retry", "count", requeued)
+	}
+
 	// Resume any archives that were interrupted before completion. Those with a
 	// persisted document list skip straight to (idempotent) indexing; the rest
 	// are re-crawled.
