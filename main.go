@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// PipelineConfig holds parameters for constructing an indexing pipeline.
+// PipelineConfig holds parameters for the indexing pipeline.
 type PipelineConfig struct {
 	APIBase     string
 	Model       string
@@ -29,7 +29,7 @@ type PipelineConfig struct {
 
 func main() {
 	var (
-		outputDir  = flag.String("o", ".", "data directory for the index, failures, archives, and moderation state")
+		outputDir  = flag.String("o", "data", "data directory for the index, failures, archives, and moderation state")
 		gateway    = flag.String("gateway", "https://ipfs.io", "IPFS gateway base URL")
 		workers    = flag.Int("workers", 8, "number of concurrent processing workers")
 		convertRPS = flag.Int("convert-rps", defaultConvertRPS, "max PDF-convert requests per second")
@@ -75,16 +75,10 @@ func main() {
 
 	indexer := NewIndexer(store, cfg)
 
-	// Recover documents that were marked permanently failed only because the API
-	// was rate limiting; those are transient and should be retried rather than
-	// dropped. Done before resuming archives so the requeued CIDs are picked up.
 	if requeued := store.RequeueRateLimited(); requeued > 0 {
 		slog.Info("requeued rate-limited failures for retry", "count", requeued)
 	}
 
-	// Resume any archives that were interrupted before completion. Those with a
-	// persisted document list skip straight to (idempotent) indexing; the rest
-	// are re-crawled.
 	if resumable := store.ResumableArchives(); len(resumable) > 0 {
 		slog.Info("resuming interrupted archives", "count", len(resumable))
 		for _, cid := range resumable {
@@ -98,8 +92,7 @@ func main() {
 	}
 }
 
-// loadAPIKey reads the API key from .api_key (checking dataDir then cwd),
-// falling back to the SAIA_API_KEY environment variable.
+// loadAPIKey reads .api_key from the data dir, then cwd, then SAIA_API_KEY.
 func loadAPIKey(dataDir string) string {
 	for _, dir := range []string{dataDir, "."} {
 		path := filepath.Join(dir, ".api_key")

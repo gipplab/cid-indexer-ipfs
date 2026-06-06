@@ -16,20 +16,16 @@ import (
 	"time"
 )
 
-// ErrRateLimited wraps a failure that was caused solely by the server rate
-// limiting us (HTTP 429) after exhausting the retry budget. It is transient —
-// the document itself is fine — so callers should keep the CID retryable rather
-// than counting it toward the permanent-failure cap.
+// ErrRateLimited indicates a transient HTTP 429 after retries are exhausted.
 var ErrRateLimited = errors.New("rate limited")
 
 const (
 	defaultModel   = "qwen3-30b-a3b-instruct-2507"
 	defaultAPIBase = "https://chat-ai.academiccloud.de/v1"
 	defaultTemp    = 0.2
-	// The PDF-to-markdown convert endpoint is much more strictly rate limited
-	// than the chat endpoint, so the two have separate request budgets.
-	defaultConvertRPS = 2 // /documents/convert requests per second
-	defaultChatRPS    = 4 // /chat/completions requests per second
+	// Convert endpoint is rate-limited more strictly than chat.
+	defaultConvertRPS = 2
+	defaultChatRPS    = 4
 
 	maxFetchSize      = 20 * 1024 * 1024 // 20 MB
 	defaultMaxTextLen = 16_000           // chars of markdown sent to the LLM for extraction
@@ -43,14 +39,11 @@ const (
 	baseBackoff         = 2 * time.Second
 	maxBackoff          = 60 * time.Second // hard ceiling on a short-backoff sleep
 
-	// When the server reports a reset window longer than quotaPauseThreshold,
-	// the endpoint's quota (e.g. a daily request cap) is exhausted. Rather than
-	// re-probing a dead quota every minute, the whole worker pool pauses until
-	// the real reset and then retries, so one run can drain a large backlog
-	// across several quota windows without manual restarts.
+	// Long reset windows mean the endpoint quota is exhausted; pause the pool
+	// until reset rather than re-probing every minute.
 	quotaPauseThreshold = 2 * time.Minute
-	maxCooldown         = 24 * time.Hour // safety ceiling on a single quota pause
-	maxQuotaPauses      = 6              // give up on a CID after this many full-window pauses
+	maxCooldown         = 24 * time.Hour
+	maxQuotaPauses      = 6
 
 	keywordPrompt = `Analyze the following academic document text. Extract the following information and return ONLY a valid JSON object with these fields:
 - "title": the document title (string)
@@ -63,9 +56,7 @@ Document text:
 `
 )
 
-// retryClass categorizes a failed API call so the retry loop can decide how to
-// react: not retry (permanent), retry as a rate limit (honor server reset, many
-// attempts), or retry as a transient server/network hiccup (a few attempts).
+// retryClass categorizes a failed API call for the retry loop.
 type retryClass int
 
 const (
@@ -77,10 +68,7 @@ const (
 // isServerError reports whether an HTTP status is a retryable 5xx.
 func isServerError(code int) bool { return code >= 500 && code <= 599 }
 
-// Pipeline fetches PDFs from IPFS, converts them to markdown, and extracts
-// structured metadata via an OpenAI-compatible LLM API. The convert and chat
-// endpoints have separate rate limiters shared across all workers, so
-// concurrent requests stay within each endpoint's rate window.
+// Pipeline fetches PDFs from IPFS, converts them to markdown, and extracts metadata via an LLM API.
 type Pipeline struct {
 	APIKey      string
 	APIBase     string
@@ -96,14 +84,12 @@ type Pipeline struct {
 	convertLimiter *rateLimiter
 	chatLimiter    *rateLimiter
 
-	// Log each endpoint's rate-limit headers just once, so a sustained 429
-	// storm reveals the server's real limit/reset window without flooding logs.
+	// Log rate-limit headers once per endpoint to avoid flooding logs during 429 storms.
 	convertRLOnce sync.Once
 	chatRLOnce    sync.Once
 }
 
-// rateLimitHeaders returns a compact summary of any rate-limit headers the
-// server sent, for diagnosing how strict (and over what window) a 429 is.
+// rateLimitHeaders summarizes rate-limit headers from a 429 response.
 func rateLimitHeaders(resp *http.Response) string {
 	keys := []string{
 		"Retry-After",
@@ -124,11 +110,7 @@ func rateLimitHeaders(resp *http.Response) string {
 	return strings.Join(parts, " ")
 }
 
-// rateLimiter is a token bucket shared across workers. In addition to steady
-// pacing, it supports a global cooldown: when the server signals a rate limit
-// (HTTP 429), penalize() holds back every worker until the reset window
-// elapses, so a strictly limited endpoint actually gets a quiet window to
-// recover instead of being hammered by a stampede of independent retries.
+// rateLimiter is a token bucket shared across workers, with optional global cooldown after 429s.
 type rateLimiter struct {
 	tokens chan struct{}
 
@@ -136,8 +118,7 @@ type rateLimiter struct {
 	blockUntil time.Time
 }
 
-// newRateLimiter issues rps tokens per second, allowing a burst of up to burst
-// tokens, then refilling steadily.
+// newRateLimiter issues rps tokens per second with a burst capacity.
 func newRateLimiter(rps, burst int) *rateLimiter {
 	if rps <= 0 {
 		rps = 1
@@ -163,10 +144,7 @@ func newRateLimiter(rps, burst int) *rateLimiter {
 	return rl
 }
 
-// acquire blocks until any active global cooldown has elapsed and the limiter
-// grants a token. Honoring the cooldown before taking a token means all workers
-// hold off together after a 429, then resume staggered at the bucket's refill
-// rate rather than stampeding the endpoint all at once.
+// acquire blocks until any cooldown has elapsed and a token is available.
 func (rl *rateLimiter) acquire() {
 	for {
 		rl.mu.Lock()
@@ -180,9 +158,7 @@ func (rl *rateLimiter) acquire() {
 	<-rl.tokens
 }
 
-// penalize pauses the limiter (for all workers) for at least d, extending any
-// existing cooldown. Called when the server returns a rate-limit response so
-// the whole pool backs off in lockstep.
+// penalize pauses all workers for at least d after a rate-limit response.
 func (rl *rateLimiter) penalize(d time.Duration) {
 	if d <= 0 {
 		return
@@ -205,17 +181,14 @@ func (p *Pipeline) initLimiters() {
 		if chatRPS <= 0 {
 			chatRPS = defaultChatRPS
 		}
-		// Both endpoints are paced steadily (burst of 1) so a pool of workers
-		// can't stampede them — especially right after a global cooldown lifts,
-		// when every blocked worker would otherwise fire at once and instantly
-		// trip the rate limit again.
+		// Burst of 1 prevents workers from stampeding after a cooldown lifts.
 		p.convertLimiter = newRateLimiter(convertRPS, 1)
 		p.chatLimiter = newRateLimiter(chatRPS, 1)
 	})
 }
 
-// Process fetches the CID from IPFS, converts the PDF to markdown, and
-// extracts keywords. Returns nil (no error) for non-PDF content.
+// Process fetches a CID from IPFS, converts PDF to markdown, and extracts keywords.
+// Returns nil, nil for non-PDF content.
 func (p *Pipeline) Process(cid string) (*IndexEntry, error) {
 	data, isPDF, err := p.fetchFromIPFS(cid)
 	if err != nil {
@@ -602,7 +575,7 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// OpenAI-compatible types
+// OpenAI-compatible API types.
 
 type chatRequest struct {
 	Model          string          `json:"model"`
@@ -612,8 +585,6 @@ type chatRequest struct {
 	ResponseFormat *responseFormat `json:"response_format,omitempty"`
 }
 
-// responseFormat requests structured JSON output from the model. The fallback
-// parser in parseExtraction still applies for models that ignore this field.
 type responseFormat struct {
 	Type string `json:"type"`
 }

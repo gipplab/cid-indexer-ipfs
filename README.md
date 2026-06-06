@@ -10,10 +10,11 @@ Given an IPFS CID pointing to a PDF file, the tool:
 2. Converts the PDF to markdown via the API's document conversion endpoint.
 3. Sends the markdown to an LLM to extract title, research field, topic,
    and the 10 most relevant keywords.
-4. Persists the results to `keyword_index.json`.
+4. Persists the results to an embedded SQLite database (`index.db`), with an
+   FTS5 full-text index over titles, fields, and keywords.
 
 Processing is incremental: already indexed CIDs are skipped on subsequent runs.
-Permanently failed CIDs (after 3 retries) are tracked in `keyword_failures.json`.
+Permanently failed CIDs (after 3 retries) are tracked in the same database.
 The tool works exclusively with two kinds of input: a **document** CID (a single
 PDF) and an **archive** CID (a directory of documents); both are submitted
 through the web UI.
@@ -28,7 +29,7 @@ IPFS UnixFS directory (a collection of documents, possibly nested). The tool:
    listing where available, falling back to the HTML directory index).
 2. Indexes each contained document through the normal pipeline.
 3. Aggregates the per-document labels into archive-level keywords and dominant
-   research fields, stored in `archives.json`.
+   research fields, stored in the index database.
 
 Once an archive is fully processed it is labeled and becomes browsable in the
 web UI, where other users can discover it and decide to **replicate** it (the
@@ -88,9 +89,8 @@ The admin can:
   archive are kept, only the membership link is dropped) or remove an individual
   document from the index by CID.
 
-Moderation state is persisted across restarts in `submissions.json` (pending
-review queue), `denylist.json` (denied CIDs), and `settings.json` (review-mode
-toggle).
+Moderation state is persisted across restarts in the index database: the
+pending review queue, the denied-CID denylist, and the review-mode setting.
 
 ## Build
 
@@ -150,7 +150,7 @@ docker build -t cidindexer-ipfs .
 
 An API key is required for indexing. The tool checks these locations in order:
 
-1. `.api_key` file in the output directory (`-o`).
+1. `.api_key` file in the data directory (`-o`, defaults to `./data`).
 2. `.api_key` file in the current working directory.
 3. `SAIA_API_KEY` environment variable.
 
@@ -171,7 +171,7 @@ through the UI, which classifies each one and queues it for indexing.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-o` | `.` | Data directory for the index, failures, archives, and moderation state |
+| `-o` | `data` | Data directory for the index, failures, archives, and moderation state (created if missing) |
 | `-gateway` | `https://ipfs.io` | IPFS gateway base URL |
 | `-workers` | `8` | Number of concurrent processing workers |
 | `-convert-rps` | `2` | Max PDF-convert requests per second (strict endpoint) |
@@ -199,56 +199,35 @@ through the UI, which classifies each one and queues it for indexing.
 - Single CID paste field (auto-classified as document or archive)
 - Live indexing progress
 
-## Output files
+## Storage
 
-| File | Description |
-|------|-------------|
-| `keyword_index.json` | Indexed metadata keyed by CID |
-| `keyword_failures.json` | Permanently failed CIDs with error details |
-| `archives.json` | Indexed archives with aggregated labels, keyed by CID |
-| `submissions.json` | CIDs awaiting admin review (when review mode is on) |
-| `denylist.json` | CIDs denied by an admin; rejected on submission |
-| `settings.json` | Admin-configurable settings (review-mode toggle) |
+All state is kept in a single embedded SQLite database, `index.db`, created in
+the data directory (`-o`, defaults to `./data`). Alongside it SQLite maintains the usual
+write-ahead-log sidecar files (`index.db-wal`, `index.db-shm`). The database
+holds:
 
-Example entry in `keyword_index.json`:
+| Table | Contents |
+|-------|----------|
+| `documents` + `documents_fts` | Indexed metadata per CID and its FTS5 full-text index |
+| `labels` | Keyword/field/sub-topic → document mapping (powers suggestions) |
+| `archives` + `archive_docs` | Archives with aggregated labels and their member documents |
+| `failures` | Permanently failed CIDs with error details |
+| `submissions` | CIDs awaiting admin review (when review mode is on) |
+| `denylist` | CIDs denied by an admin; rejected on submission |
+| `settings` | Admin-configurable settings (review-mode toggle) |
 
-```json
-{
-  "bafyrei...": {
-    "cid": "bafyrei...",
-    "title": "Attention Is All You Need",
-    "broad_field": "Computer Science",
-    "sub_topic": "Machine Learning",
-    "keywords": ["transformer", "attention mechanism", "..."],
-    "indexed_at": "2026-03-04T14:30:00Z"
-  }
-}
-```
+The database is the only file that needs to be backed up or mounted to persist
+state. Inspect it with the standard `sqlite3` CLI, e.g.:
 
-Example entry in `archives.json`:
-
-```json
-{
-  "bafybei...": {
-    "cid": "bafybei...",
-    "name": "Computer Science",
-    "owner": "alice",
-    "status": "done",
-    "doc_cids": ["Qm...", "Qm..."],
-    "doc_count": 2,
-    "indexed": 2,
-    "failed": 0,
-    "top_keywords": ["machine learning", "transformer", "..."],
-    "broad_fields": [{"field": "Computer Science", "count": 2}],
-    "submitted_at": "2026-03-04T14:00:00Z",
-    "indexed_at": "2026-03-04T14:30:00Z"
-  }
-}
+```sh
+sqlite3 data/index.db 'SELECT cid, title FROM documents LIMIT 5;'
 ```
 
 ## Integration with D-LOCKSS
 
 The D-LOCKSS monitor can export payload CIDs via its dashboard
-(`/api/payload-cids`). Submit those CIDs through the indexer's web UI, then
-place the resulting `keyword_index.json` in the monitor's data directory
-(`~/.dlockss-monitor/`) to enable keyword search in the monitor dashboard.
+(`/api/payload-cids`). Submit those CIDs through the indexer's web UI to index
+them. The indexed metadata now lives in `index.db` rather than a
+`keyword_index.json` file, so wiring it into the monitor dashboard requires
+exporting from the database (e.g. via `sqlite3`) into whatever format the
+monitor expects.

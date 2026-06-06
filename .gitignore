@@ -1,10 +1,16 @@
+# Runtime state directory (DB, API key, archives, moderation state)
+data/
+
+# Secrets (also kept under data/ at runtime)
 .api_key
 .env
-keyword_index.json
-keyword_failures.json
-archives.json
-submissions.json
-denylist.json
-settings.json
+
+# SQLite index database (legacy location / non-default -o dirs)
+index.db
+index.db-wal
+index.db-shm
+
+# build artifacts
+cidindexer
 cidindexer-ipfs
 *.tmp

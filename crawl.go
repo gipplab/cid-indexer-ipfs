@@ -52,8 +52,7 @@ type childEntry struct {
 	CID  string
 }
 
-// crawler enumerates the document CIDs contained in an archive (directory) CID
-// by talking to an IPFS gateway. It performs no LLM work.
+// crawler enumerates document CIDs in an archive via an IPFS gateway.
 type crawler struct {
 	gateway  string
 	maxDepth int
@@ -76,8 +75,7 @@ func newCrawler(gateway string, maxDepth, maxDocs int) *crawler {
 	}
 }
 
-// Classify determines whether a CID is a directory, a PDF, or another file,
-// using a cheap ranged GET that peeks at the response headers and first bytes.
+// Classify determines whether a CID is a directory, PDF, or other file.
 func (c *crawler) Classify(cid string) (nodeKind, error) {
 	reqURL := c.gateway + "/ipfs/" + url.PathEscape(cid)
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
@@ -124,10 +122,7 @@ var nonPDFExt = map[string]struct{}{
 	".epub": {}, ".djvu": {}, ".ps": {}, ".tex": {}, ".bib": {}, ".yaml": {}, ".yml": {},
 }
 
-// classifyByName guesses a child's kind from its filename, avoiding a gateway
-// fetch. It returns kindUnknown when the name is inconclusive (no extension,
-// usually a subdirectory, or an unrecognized extension), in which case the
-// caller should probe the gateway to be sure.
+// classifyByName guesses a child's kind from its filename, avoiding a gateway fetch.
 func classifyByName(name string) nodeKind {
 	n := strings.ToLower(strings.TrimSpace(name))
 	if n == "" {
@@ -146,8 +141,7 @@ func classifyByName(name string) nodeKind {
 	return kindUnknown // unknown extension: probe to avoid skipping a directory
 }
 
-// Crawl recursively walks an archive (directory) CID and returns the CIDs of
-// every PDF document it contains, deduplicated and in discovery order.
+// Crawl walks an archive CID and returns PDF document CIDs in discovery order.
 func (c *crawler) Crawl(rootCID string) ([]string, error) {
 	kind, err := c.Classify(rootCID)
 	if err != nil {
@@ -184,10 +178,6 @@ func (c *crawler) Crawl(rootCID string) ([]string, error) {
 			if _, seen := visited[ch.CID]; seen {
 				continue
 			}
-			// Classify by filename first; only probe the gateway when the
-			// name is inconclusive (no/unknown extension, likely a subdir).
-			// This avoids a slow per-file network round-trip for the common
-			// case of a directory full of named documents.
 			kind := classifyByName(ch.Name)
 			if kind == kindUnknown {
 				var err error
@@ -219,10 +209,7 @@ func (c *crawler) Crawl(rootCID string) ([]string, error) {
 	return order, nil
 }
 
-// enumerateDir lists the immediate children of a directory CID. It first tries
-// the structured dag-json representation (supported by Kubo/self-hosted
-// gateways) and falls back to parsing the gateway's HTML directory index
-// (which is what Cloudflare-backed gateways like ipfs.io return).
+// enumerateDir lists immediate children, trying dag-json first then HTML fallback.
 func (c *crawler) enumerateDir(cid string) ([]childEntry, error) {
 	if children, err := c.enumerateDagJSON(cid); err == nil && len(children) > 0 {
 		return children, nil

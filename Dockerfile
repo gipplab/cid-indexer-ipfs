@@ -4,11 +4,12 @@
 FROM golang:1.25-alpine AS build
 WORKDIR /src
 
-# No external dependencies (standard library only), so go.mod alone is enough.
-COPY go.mod ./
+# Fetch dependencies first so this layer is cached across source changes.
+COPY go.mod go.sum ./
 RUN go mod download
 
 COPY *.go ./
+COPY web/ web/
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/cidindexer-ipfs .
 
 # --- runtime stage ---

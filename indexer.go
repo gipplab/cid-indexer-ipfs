@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Job kinds processed by the background dispatcher.
+// Job kinds for the background dispatcher.
 const (
 	jobArchive = "archive"
 	jobDocs    = "docs"
@@ -22,9 +22,7 @@ type indexJob struct {
 	docCIDs []string // document CIDs (jobDocs)
 }
 
-// Indexer serializes all indexing work through a single background goroutine,
-// so archives and documents can be submitted at any time (even while a run is
-// in progress) without racing. Submissions are queued and processed in order.
+// Indexer runs indexing work through a single background queue.
 type Indexer struct {
 	store  *Store
 	cfg    PipelineConfig
@@ -42,8 +40,7 @@ func NewIndexer(store *Store, cfg PipelineConfig) *Indexer {
 	return ix
 }
 
-// Queued returns the number of jobs waiting to be processed (excluding the one
-// currently running).
+// Queued returns jobs waiting to be processed, excluding the one in flight.
 func (ix *Indexer) Queued() int {
 	q := ix.queued.Load()
 	if q < 0 {
@@ -52,14 +49,13 @@ func (ix *Indexer) Queued() int {
 	return int(q)
 }
 
-// EnqueueArchive registers an archive (so it appears immediately as queued) and
-// schedules it for crawling + indexing.
+// EnqueueArchive registers an archive and schedules it for crawling + indexing.
 func (ix *Indexer) EnqueueArchive(cid, owner string) {
 	ix.store.AddArchive(cid, owner)
 	ix.enqueue(indexJob{kind: jobArchive, cid: cid, owner: owner})
 }
 
-// EnqueueDocs schedules a set of document CIDs for indexing.
+// EnqueueDocs schedules document CIDs for indexing.
 func (ix *Indexer) EnqueueDocs(cids []string) {
 	if len(cids) == 0 {
 		return
@@ -106,8 +102,6 @@ func (ix *Indexer) process(job indexJob) {
 	}
 }
 
-// indexPending processes a pre-filtered list of pending CIDs through the
-// pipeline, using a pool of cfg.Workers concurrent workers.
 func indexPending(store *Store, pending []string, apiKey string, cfg PipelineConfig) {
 	pipeline := &Pipeline{
 		APIKey:      apiKey,
@@ -132,9 +126,6 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 			for cid := range work {
 				entry, err := pipeline.Process(cid)
 				if err != nil {
-					// Rate-limit failures are transient (the server is busy, the
-					// document is fine), so keep the CID retryable instead of
-					// counting it toward the permanent-failure cap.
 					if errors.Is(err, ErrRateLimited) {
 						slog.Warn("rate limited, leaving CID for a later run", "cid", cid, "error", err)
 						store.RecordRateLimited(cid, err.Error())
@@ -172,10 +163,8 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 	)
 }
 
-// indexArchive crawls an archive (directory) CID, indexes every PDF document it
-// contains through the normal pipeline, then computes aggregated archive-level
-// labels for browsing. If the document list was already discovered in a prior
-// run, the crawl is skipped and indexing resumes directly.
+// indexArchive crawls an archive CID, indexes its PDFs, and aggregates labels.
+// If the document list was persisted from a prior run, the crawl is skipped.
 func indexArchive(store *Store, archiveCID, owner, apiKey string, cfg PipelineConfig) {
 	store.AddArchive(archiveCID, owner)
 

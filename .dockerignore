@@ -1,14 +1,14 @@
 # Secrets and local runtime state (never bake into the image)
+data/
 .api_key
-keyword_index.json
-keyword_failures.json
-archives.json
-submissions.json
-denylist.json
-settings.json
+.env
+index.db
+index.db-wal
+index.db-shm
 *.tmp
 
 # Prebuilt binary (rebuilt inside the image)
+cidindexer
 cidindexer-ipfs
 
 # VCS and docs not needed for the build
