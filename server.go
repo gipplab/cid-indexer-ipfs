@@ -565,7 +565,8 @@ func dashboardHTML(gateway string) string {
         .class-tag:hover { filter: brightness(0.92); }
         .field-tag { background: #e3f2fd; border-color: #90caf9; color: #1565c0; }
         .subtopic-tag { background: #f3e5f5; border-color: #ce93d8; color: #7b1fa2; }
-        .pagination { display: flex; justify-content: center; align-items: center; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #eee; }
+        .pagination { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #eee; }
+        .page-ellipsis { font-size: 0.85em; color: #999; padding: 0 2px; }
         .page-btn { background: #eee; border: 1px solid #ccc; padding: 4px 12px; font-size: 0.85em; cursor: pointer; font-family: inherit; }
         .page-btn:hover { background: #ddd; border-color: #999; }
         .page-btn.active { background: #333; color: white; border-color: #333; }
@@ -737,15 +738,36 @@ func dashboardHTML(gateway string) string {
             if (totalPages > 1) {
                 html += '<div class="pagination">';
                 html += '<button class="page-btn" onclick="goPage(' + (page - 1) + ')"' + (page === 0 ? ' disabled' : '') + '>&laquo;</button>';
-                for (var p = 0; p < totalPages; p++) {
-                    html += '<button class="page-btn' + (p === page ? ' active' : '') + '" onclick="goPage(' + p + ')">' + (p + 1) + '</button>';
-                }
+                pageWindow(page, totalPages).forEach(function(p) {
+                    if (p === '...') {
+                        html += '<span class="page-ellipsis">\u2026</span>';
+                    } else {
+                        html += '<button class="page-btn' + (p === page ? ' active' : '') + '" onclick="goPage(' + p + ')">' + (p + 1) + '</button>';
+                    }
+                });
                 html += '<button class="page-btn" onclick="goPage(' + (page + 1) + ')"' + (page >= totalPages - 1 ? ' disabled' : '') + '>&raquo;</button>';
                 html += '<span class="page-info">' + (start + 1) + '\u2013' + end + ' of ' + total + '</span>';
                 html += '</div>';
             }
 
             document.getElementById('resultsDiv').innerHTML = html;
+        }
+
+        // Build a compact list of page indices to display, with '...' markers for
+        // gaps. Always shows the first and last page plus a window around the
+        // current page so the control never overflows horizontally.
+        function pageWindow(current, totalPages) {
+            var span = 2; // pages to show on each side of the current page
+            var pages = [];
+            var last = -1;
+            for (var p = 0; p < totalPages; p++) {
+                if (p === 0 || p === totalPages - 1 || (p >= current - span && p <= current + span)) {
+                    if (last !== -1 && p - last > 1) pages.push('...');
+                    pages.push(p);
+                    last = p;
+                }
+            }
+            return pages;
         }
 
         function goPage(p) {
