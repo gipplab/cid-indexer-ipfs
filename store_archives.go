@@ -30,6 +30,26 @@ func scanArchive(sc scanner) (Archive, error) {
 	return a, nil
 }
 
+// fillArchiveProgress sets Indexed/Failed from the current member tables.
+func (s *Store) fillArchiveProgress(a *Archive) {
+	if a == nil || a.CID == "" {
+		return
+	}
+	var indexed, failed int
+	s.db.QueryRow(`
+SELECT COUNT(*)
+FROM archive_docs ad
+JOIN documents d ON d.cid = ad.doc_cid
+WHERE ad.archive_cid=?`, a.CID).Scan(&indexed)
+	s.db.QueryRow(`
+SELECT COUNT(*)
+FROM archive_docs ad
+JOIN failures f ON f.cid = ad.doc_cid
+WHERE ad.archive_cid=? AND f.count >= ?`, a.CID, maxRetries).Scan(&failed)
+	a.Indexed = indexed
+	a.Failed = failed
+}
+
 // AddArchive registers an archive in the queued state, or updates the owner of
 // an existing one. Returns true if the archive was newly created.
 func (s *Store) AddArchive(cid, owner string) bool {
@@ -148,8 +168,24 @@ FROM archive_docs ad
 JOIN failures f ON f.cid = ad.doc_cid
 WHERE ad.archive_cid=? AND f.count >= ?`, cid, maxRetries).Scan(&failed)
 
+	var pending int
+	s.db.QueryRow(`
+SELECT COUNT(*)
+FROM archive_docs ad
+WHERE ad.archive_cid=?
+  AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.cid = ad.doc_cid)
+  AND NOT EXISTS (SELECT 1 FROM failures f WHERE f.cid = ad.doc_cid AND f.count >= ?)`,
+		cid, maxRetries).Scan(&pending)
+
 	topKeywords := topCounted(kwCount, 12)
 	broadFields := topFields(fieldCount)
+
+	status := archiveDone
+	if pending > 0 {
+		status = archiveIndexing
+		slog.Warn("archive still has pending documents",
+			"cid", cid, "pending", pending, "indexed", indexed, "failed", failed)
+	}
 
 	err = s.write(func(tx *sql.Tx) error {
 		var name string
@@ -166,7 +202,7 @@ UPDATE archives SET indexed=?, failed=?, top_keywords=?, broad_fields=?,
     status=?, indexed_at=?, name=?
 WHERE cid=?`,
 			indexed, failed, marshalJSON(topKeywords), marshalJSON(broadFields),
-			archiveDone, nano(time.Now()), name, cid)
+			status, nano(time.Now()), name, cid)
 		return err
 	})
 	if err != nil {
@@ -185,6 +221,7 @@ func (s *Store) Archives() []Archive {
 	var out []Archive
 	for rows.Next() {
 		if a, err := scanArchive(rows); err == nil {
+			s.fillArchiveProgress(&a)
 			out = append(out, a)
 		}
 	}
@@ -268,6 +305,7 @@ func (s *Store) GetArchive(cid string) (Archive, []IndexEntry, bool) {
 		return Archive{}, nil, false
 	}
 	a.DocCIDs = s.ArchiveDocCIDs(cid)
+	s.fillArchiveProgress(&a)
 
 	rows, err := s.db.Query(`
 SELECT d.cid, d.title, d.broad_field, d.sub_topic, d.keywords, d.indexed_at

@@ -194,8 +194,19 @@ func (s *Store) RetryFailure(cid string) bool {
 	return n > 0
 }
 
-// RecordSkip marks a CID as processed but not indexed (e.g. non-PDF).
-func (s *Store) RecordSkip() {
+// RecordSkip marks a non-indexable CID (e.g. non-PDF) as permanently done.
+func (s *Store) RecordSkip(cid string) {
+	now := nano(time.Now())
+	err := s.write(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`
+INSERT INTO failures(cid, count, last_try, reason) VALUES(?,?,?,?)
+ON CONFLICT(cid) DO UPDATE SET count=excluded.count, last_try=excluded.last_try, reason=excluded.reason`,
+			cid, maxRetries, now, "skipped: not a PDF")
+		return err
+	})
+	if err != nil {
+		slog.Error("failed to record skip", "cid", cid, "error", err)
+	}
 	s.mu.Lock()
 	s.skipped++
 	if s.pending > 0 {

@@ -124,23 +124,26 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 		go func() {
 			defer wg.Done()
 			for cid := range work {
-				entry, err := pipeline.Process(cid)
-				if err != nil {
-					if errors.Is(err, ErrRateLimited) {
-						slog.Warn("rate limited, leaving CID for a later run", "cid", cid, "error", err)
-						store.RecordRateLimited(cid, err.Error())
-						continue
+				for {
+					entry, err := pipeline.Process(cid)
+					if err != nil {
+						if errors.Is(err, ErrRateLimited) {
+							slog.Warn("rate limited, retrying", "cid", cid, "error", err)
+							time.Sleep(baseBackoff)
+							continue
+						}
+						slog.Error("processing failed", "cid", cid, "error", err)
+						store.RecordFailure(cid, err.Error())
+						break
 					}
-					slog.Error("processing failed", "cid", cid, "error", err)
-					store.RecordFailure(cid, err.Error())
-					continue
+					if entry == nil {
+						store.RecordSkip(cid)
+						break
+					}
+					store.Add(entry)
+					slog.Info("indexed", "cid", cid, "title", entry.Title, "keywords", len(entry.Keywords))
+					break
 				}
-				if entry == nil {
-					store.RecordSkip()
-					continue
-				}
-				store.Add(entry)
-				slog.Info("indexed", "cid", cid, "title", entry.Title, "keywords", len(entry.Keywords))
 			}
 		}()
 	}
@@ -188,11 +191,12 @@ func indexArchive(store *Store, archiveCID, owner, apiKey string, cfg PipelineCo
 		docCIDs = crawled
 	}
 
-	if len(docCIDs) > 0 {
+	for {
 		pending := store.Pending(docCIDs)
-		if len(pending) > 0 {
-			indexPending(store, pending, apiKey, cfg)
+		if len(pending) == 0 {
+			break
 		}
+		indexPending(store, pending, apiKey, cfg)
 	}
 
 	store.FinalizeArchive(archiveCID)

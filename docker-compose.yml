@@ -13,7 +13,7 @@ services:
     command:
       - "-o=/data"
       - "-workers=3"
-      - "-convert-rps=2"
+      - "-convert-rps=1"
       - "-rps=1"
       - "-max-text=8000"
     volumes:

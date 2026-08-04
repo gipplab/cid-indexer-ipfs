@@ -16,15 +16,15 @@ import (
 	"time"
 )
 
-// ErrRateLimited indicates a transient HTTP 429 after retries are exhausted.
+// ErrRateLimited indicates a transient HTTP 429 that should be retried.
 var ErrRateLimited = errors.New("rate limited")
 
 const (
-	defaultModel   = "qwen3-30b-a3b-instruct-2507"
+	defaultModel   = "qwen3.6-35b-a3b"
 	defaultAPIBase = "https://chat-ai.academiccloud.de/v1"
 	defaultTemp    = 0.2
-	// Convert endpoint is rate-limited more strictly than chat.
-	defaultConvertRPS = 2
+	// Convert is capped at 1 concurrent request on the SAIA documents endpoint.
+	defaultConvertRPS = 1
 	defaultChatRPS    = 4
 
 	maxFetchSize      = 20 * 1024 * 1024 // 20 MB
@@ -34,7 +34,6 @@ const (
 	defaultConvertTimeout = 180 * time.Second // large PDFs can take a while to convert
 	llmTimeout            = 120 * time.Second
 
-	maxRateLimitRetries = 5
 	maxTransientRetries = 2 // extra attempts for 5xx / network hiccups
 	baseBackoff         = 2 * time.Second
 	maxBackoff          = 60 * time.Second // hard ceiling on a short-backoff sleep
@@ -43,7 +42,6 @@ const (
 	// until reset rather than re-probing every minute.
 	quotaPauseThreshold = 2 * time.Minute
 	maxCooldown         = 24 * time.Hour
-	maxQuotaPauses      = 6
 
 	keywordPrompt = `Analyze the following academic document text. Extract the following information and return ONLY a valid JSON object with these fields:
 - "title": the document title (string)
@@ -110,9 +108,12 @@ func rateLimitHeaders(resp *http.Response) string {
 	return strings.Join(parts, " ")
 }
 
-// rateLimiter is a token bucket shared across workers, with optional global cooldown after 429s.
+// rateLimiter is a shared worker gate with optional cooldown after 429s.
+// When hold is set, acquire/release bracket an in-flight call (convert).
+// Otherwise tokens refill at rps (chat).
 type rateLimiter struct {
 	tokens chan struct{}
+	hold   bool
 
 	mu         sync.Mutex
 	blockUntil time.Time
@@ -144,6 +145,18 @@ func newRateLimiter(rps, burst int) *rateLimiter {
 	return rl
 }
 
+// newConcurrencyLimiter caps in-flight operations at n.
+func newConcurrencyLimiter(n int) *rateLimiter {
+	if n < 1 {
+		n = 1
+	}
+	rl := &rateLimiter{tokens: make(chan struct{}, n), hold: true}
+	for i := 0; i < n; i++ {
+		rl.tokens <- struct{}{}
+	}
+	return rl
+}
+
 // acquire blocks until any cooldown has elapsed and a token is available.
 func (rl *rateLimiter) acquire() {
 	for {
@@ -156,6 +169,16 @@ func (rl *rateLimiter) acquire() {
 		time.Sleep(wait)
 	}
 	<-rl.tokens
+}
+
+func (rl *rateLimiter) release() {
+	if !rl.hold {
+		return
+	}
+	select {
+	case rl.tokens <- struct{}{}:
+	default:
+	}
 }
 
 // penalize pauses all workers for at least d after a rate-limit response.
@@ -181,8 +204,7 @@ func (p *Pipeline) initLimiters() {
 		if chatRPS <= 0 {
 			chatRPS = defaultChatRPS
 		}
-		// Burst of 1 prevents workers from stampeding after a cooldown lifts.
-		p.convertLimiter = newRateLimiter(convertRPS, 1)
+		p.convertLimiter = newConcurrencyLimiter(convertRPS)
 		p.chatLimiter = newRateLimiter(chatRPS, 1)
 	})
 }
@@ -199,7 +221,6 @@ func (p *Pipeline) Process(cid string) (*IndexEntry, error) {
 		return nil, nil
 	}
 
-	slog.Info("converting PDF", "cid", cid, "bytes", len(data))
 	markdown, err := p.convertPDFWithRetry(data, cid)
 	if err != nil {
 		return nil, fmt.Errorf("convert: %w", err)
@@ -247,38 +268,29 @@ func (p *Pipeline) fetchFromIPFS(cid string) ([]byte, bool, error) {
 
 func (p *Pipeline) convertPDFWithRetry(pdfData []byte, cid string) (string, error) {
 	p.initLimiters()
-	rateLimitTries, transientTries, quotaPauses := 0, 0, 0
+	rateLimitTries, transientTries := 0, 0
 	for {
 		p.convertLimiter.acquire()
+		slog.Info("converting PDF", "cid", cid, "bytes", len(pdfData))
 		markdown, class, retryAfter, err := p.convertPDF(pdfData)
+		p.convertLimiter.release()
 		if err == nil {
 			return markdown, nil
 		}
 		switch class {
 		case retryRateLimit:
-			// A long reset means the convert quota window is exhausted (e.g. a
-			// daily cap). Pause the whole pool until the real reset and retry
-			// the same CID, instead of hammering a dead quota every minute.
+			// Long reset = quota window exhausted; pause the pool until then.
 			if retryAfter > quotaPauseThreshold {
-				if quotaPauses >= maxQuotaPauses {
-					return "", fmt.Errorf("%w: %v", ErrRateLimited, err)
-				}
 				pause := capCooldown(retryAfter)
-				quotaPauses++
 				slog.Warn("convert quota exhausted, pausing pool until reset",
 					"cid", cid, "pause", pause.Round(time.Second),
 					"resume_at", time.Now().Add(pause).Format(time.RFC3339))
 				p.convertLimiter.penalize(pause)
-				continue // acquire() blocks until the cooldown lifts, then retries
-			}
-			if rateLimitTries >= maxRateLimitRetries {
-				return "", fmt.Errorf("%w: %v", ErrRateLimited, err)
+				continue
 			}
 			wait := backoffDuration(rateLimitTries, retryAfter)
-			slog.Warn("rate limited on convert, backing off", "cid", cid, "attempt", rateLimitTries+1, "wait", wait)
 			rateLimitTries++
-			// Hold back the entire worker pool, not just this request, so the
-			// strictly limited convert endpoint gets a quiet window to recover.
+			slog.Warn("rate limited on convert, backing off", "cid", cid, "attempt", rateLimitTries, "wait", wait)
 			p.convertLimiter.penalize(wait)
 			time.Sleep(wait)
 		case retryTransient:
@@ -295,9 +307,7 @@ func (p *Pipeline) convertPDFWithRetry(pdfData []byte, cid string) (string, erro
 	}
 }
 
-// convertPDF returns (markdown, retryClass, retryAfter, error). retryClass tells
-// the caller whether and how to retry; retryAfter carries the server's reset
-// hint for rate limits.
+// convertPDF returns (markdown, retryClass, retryAfter, error).
 func (p *Pipeline) convertPDF(pdfData []byte) (string, retryClass, time.Duration, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
@@ -375,7 +385,7 @@ func (p *Pipeline) convertTimeout() time.Duration {
 
 func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionResult, error) {
 	p.initLimiters()
-	rateLimitTries, transientTries, quotaPauses := 0, 0, 0
+	rateLimitTries, transientTries := 0, 0
 	for {
 		p.chatLimiter.acquire()
 		result, class, retryAfter, err := p.extractKeywords(markdown)
@@ -384,26 +394,17 @@ func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionRe
 		}
 		switch class {
 		case retryRateLimit:
-			// Long reset = chat/extract quota exhausted; pause the pool until
-			// the real reset and retry, rather than re-probing every minute.
 			if retryAfter > quotaPauseThreshold {
-				if quotaPauses >= maxQuotaPauses {
-					return nil, fmt.Errorf("%w: %v", ErrRateLimited, err)
-				}
 				pause := capCooldown(retryAfter)
-				quotaPauses++
 				slog.Warn("extract quota exhausted, pausing pool until reset",
 					"cid", cid, "pause", pause.Round(time.Second),
 					"resume_at", time.Now().Add(pause).Format(time.RFC3339))
 				p.chatLimiter.penalize(pause)
-				continue // acquire() blocks until the cooldown lifts, then retries
-			}
-			if rateLimitTries >= maxRateLimitRetries {
-				return nil, fmt.Errorf("%w: %v", ErrRateLimited, err)
+				continue
 			}
 			wait := backoffDuration(rateLimitTries, retryAfter)
-			slog.Warn("rate limited on extract, backing off", "cid", cid, "attempt", rateLimitTries+1, "wait", wait)
 			rateLimitTries++
+			slog.Warn("rate limited on extract, backing off", "cid", cid, "attempt", rateLimitTries, "wait", wait)
 			p.chatLimiter.penalize(wait)
 			time.Sleep(wait)
 		case retryTransient:
@@ -423,15 +424,19 @@ func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionRe
 // extractKeywords returns (result, retryClass, retryAfter, error).
 func (p *Pipeline) extractKeywords(markdown string) (*extractionResult, retryClass, time.Duration, error) {
 	temp := p.Temperature
+	// Disable thinking mode so max_tokens is spent on the JSON answer.
+	thinkingOff := false
 	reqBody := chatRequest{
 		Model: p.Model,
 		Messages: []chatMessage{{
 			Role:    "user",
 			Content: keywordPrompt + markdown,
 		}},
-		Temperature:    &temp,
-		MaxTokens:      512,
-		ResponseFormat: &responseFormat{Type: "json_object"},
+		Temperature:        &temp,
+		MaxTokens:          1024,
+		ResponseFormat:     &responseFormat{Type: "json_object"},
+		EnableThinking:     &thinkingOff,
+		ChatTemplateKwargs: map[string]interface{}{"enable_thinking": false},
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -477,11 +482,15 @@ func (p *Pipeline) extractKeywords(markdown string) (*extractionResult, retryCla
 	if chatResp.Error != nil {
 		return nil, retryNone, 0, fmt.Errorf("API error: %s", chatResp.Error.Message)
 	}
-	if len(chatResp.Choices) == 0 || chatResp.Choices[0].Message.Content == "" {
-		return nil, retryNone, 0, fmt.Errorf("empty LLM response")
+	if len(chatResp.Choices) == 0 {
+		return nil, retryTransient, 0, fmt.Errorf("empty LLM response")
+	}
+	content := strings.TrimSpace(chatResp.Choices[0].Message.Content)
+	if content == "" {
+		return nil, retryTransient, 0, fmt.Errorf("empty LLM response")
 	}
 
-	result, err := parseExtraction(chatResp.Choices[0].Message.Content)
+	result, err := parseExtraction(content)
 	return result, retryNone, 0, err
 }
 
@@ -578,11 +587,13 @@ func truncate(s string, n int) string {
 // OpenAI-compatible API types.
 
 type chatRequest struct {
-	Model          string          `json:"model"`
-	Messages       []chatMessage   `json:"messages"`
-	Temperature    *float64        `json:"temperature,omitempty"`
-	MaxTokens      int             `json:"max_tokens,omitempty"`
-	ResponseFormat *responseFormat `json:"response_format,omitempty"`
+	Model              string                 `json:"model"`
+	Messages           []chatMessage          `json:"messages"`
+	Temperature        *float64               `json:"temperature,omitempty"`
+	MaxTokens          int                    `json:"max_tokens,omitempty"`
+	ResponseFormat     *responseFormat        `json:"response_format,omitempty"`
+	EnableThinking     *bool                  `json:"enable_thinking,omitempty"`
+	ChatTemplateKwargs map[string]interface{} `json:"chat_template_kwargs,omitempty"`
 }
 
 type responseFormat struct {

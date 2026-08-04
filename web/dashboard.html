@@ -403,6 +403,7 @@
                         '<div class="arch-actions">' +
                             '<button class="btn" onclick="openArchive(\'' + escJs(a.cid) + '\')">DETAILS</button>' +
                             '<button class="btn" onclick="replicate(\'' + escJs(a.cid) + '\')">REPLICATE</button>' +
+                            '<button class="btn" onclick="exportCids(\'' + escJs(a.cid) + '\')">EXPORT</button>' +
                         '</div>' +
                     '</div>' +
                 '</div>';
@@ -436,6 +437,26 @@
                 navigator.clipboard.writeText(cid).catch(function() {});
             }
             alert('Archive CID copied.\n\nTo replicate, pin it with your own IPFS node:\n\n' + cmd);
+        }
+
+        function exportCids(archiveCid) {
+            fetch('/api/archive?cid=' + encodeURIComponent(archiveCid) + '&t=' + Date.now())
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.error) { alert(data.error); return; }
+                    var cids = (data.archive && data.archive.doc_cids) || [];
+                    if (!cids.length && data.documents) {
+                        cids = data.documents.map(function(d) { return d.cid; }).filter(Boolean);
+                    }
+                    if (!cids.length) { alert('No document CIDs to export.'); return; }
+                    var blob = new Blob([cids.join('\n') + '\n'], { type: 'text/plain' });
+                    var a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = archiveCid + '-cids.txt';
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                })
+                .catch(function() { alert('Failed to export CIDs.'); });
         }
 
         document.getElementById('archSearchBtn').addEventListener('click', loadArchives);

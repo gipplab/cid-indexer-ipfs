@@ -174,11 +174,11 @@ through the UI, which classifies each one and queues it for indexing.
 | `-o` | `data` | Data directory for the index, failures, archives, and moderation state (created if missing) |
 | `-gateway` | `https://ipfs.io` | IPFS gateway base URL |
 | `-workers` | `8` | Number of concurrent processing workers |
-| `-convert-rps` | `2` | Max PDF-convert requests per second (strict endpoint) |
+| `-convert-rps` | `1` | Max concurrent PDF-convert requests |
 | `-rps` | `4` | Max keyword-extraction (chat) requests per second |
 | `-max-text` | `16000` | Max chars of document text sent to the LLM |
 | `-convert-timeout` | `180s` | HTTP timeout for a single PDF-convert request |
-| `-model` | `qwen3-30b-a3b-instruct-2507` | LLM model for keyword extraction |
+| `-model` | `qwen3.6-35b-a3b` | LLM model for keyword extraction |
 | `-api-base` | `https://chat-ai.academiccloud.de/v1` | OpenAI-compatible API base URL |
 | `-spacing` | `100ms` | Minimum delay between dispatching CIDs |
 | `-temp` | `0.2` | Sampling temperature for keyword extraction |
@@ -196,6 +196,7 @@ through the UI, which classifies each one and queues it for indexing.
 - Browse archives grid (aggregated labels, owner, status) with topic filtering
 - Archive detail view listing the contained documents
 - Replicate action (copies the archive CID + shows a pin command)
+- Export action (downloads a newline-separated list of document CIDs)
 - Single CID paste field (auto-classified as document or archive)
 - Live indexing progress
 

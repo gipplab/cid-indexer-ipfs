@@ -92,7 +92,11 @@ func TestArchiveLifecycleAndMembership(t *testing.T) {
 
 	s.AddArchive("arch", "alice")
 	s.SetArchiveDocs("arch", docs)
-	for _, dc := range docs {
+	s.Add(mkEntry(docs[0], "Title "+docs[0], "Computer Science", "Systems", "ipfs"))
+	if got := s.Archives(); len(got) != 1 || got[0].Indexed != 1 || got[0].DocCount != 3 {
+		t.Fatalf("Archives()[0] progress = indexed:%d count:%d, want 1/3", got[0].Indexed, got[0].DocCount)
+	}
+	for _, dc := range docs[1:] {
 		s.Add(mkEntry(dc, "Title "+dc, "Computer Science", "Systems", "ipfs"))
 	}
 	s.FinalizeArchive("arch")

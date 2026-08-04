@@ -32,7 +32,7 @@ func main() {
 		outputDir  = flag.String("o", "data", "data directory for the index, failures, archives, and moderation state")
 		gateway    = flag.String("gateway", "https://ipfs.io", "IPFS gateway base URL")
 		workers    = flag.Int("workers", 8, "number of concurrent processing workers")
-		convertRPS = flag.Int("convert-rps", defaultConvertRPS, "max PDF-convert requests per second")
+		convertRPS = flag.Int("convert-rps", defaultConvertRPS, "max concurrent PDF-convert requests")
 		chatRPS    = flag.Int("rps", defaultChatRPS, "max keyword-extraction (chat) requests per second")
 		maxText    = flag.Int("max-text", defaultMaxTextLen, "max chars of document text sent to the LLM")
 		convertTO  = flag.Duration("convert-timeout", defaultConvertTimeout, "HTTP timeout for a single PDF-convert request")
