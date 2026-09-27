@@ -207,7 +207,7 @@
                         var url = GATEWAY + '/ipfs/' + encodeURIComponent(s.cid);
                         var kindCls = s.kind === 'archive' ? 'kind-archive' : 'kind-document';
                         return '<div class="sub-row"><div class="sub-main">' +
-                            '<div class="sub-cid"><a href="' + url + '" target="_blank" rel="noopener">' + esc(s.cid) + '</a></div>' +
+                            '<div class="sub-cid"><a href="' + url + '" target="_blank">' + esc(s.cid) + '</a></div>' +
                             '<span class="kind-tag ' + kindCls + '">' + esc(s.kind) + '</span>' +
                             (s.owner ? ' <span class="muted">by ' + esc(s.owner) + '</span>' : '') +
                             '</div>' +
@@ -266,7 +266,7 @@
                     list.innerHTML = currentFailures.map(function(f) {
                         var url = GATEWAY + '/ipfs/' + encodeURIComponent(f.cid);
                         return '<div class="fail-row"><div class="fail-main">' +
-                            '<div class="fail-cid"><a href="' + url + '" target="_blank" rel="noopener">' + esc(f.cid) + '</a></div>' +
+                            '<div class="fail-cid"><a href="' + url + '" target="_blank">' + esc(f.cid) + '</a></div>' +
                             (f.reason ? '<div class="fail-reason">' + esc(f.reason) + '</div>' : '') +
                             '</div><button class="btn btn-retry" onclick="retryDoc(\'' + escJs(f.cid) + '\', this)">RETRY</button></div>';
                     }).join('');

@@ -180,13 +180,10 @@ func ipfsAPIProxy(api string) http.Handler {
 			return
 		}
 		defer body.Close()
-		buf := make([]byte, 4)
+		buf := make([]byte, 512)
 		n, _ := io.ReadFull(body, buf)
-		if n >= 4 && string(buf[:4]) == "%PDF" {
-			w.Header().Set("Content-Type", "application/pdf")
-		} else {
-			w.Header().Set("Content-Type", "application/octet-stream")
-		}
+		w.Header().Set("Content-Type", http.DetectContentType(buf[:n]))
+		w.Header().Set("Content-Disposition", "inline")
 		if n > 0 {
 			w.Write(buf[:n])
 		}

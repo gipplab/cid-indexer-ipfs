@@ -205,7 +205,7 @@
             html += pageItems.map(function(r) {
                 var cidDisplay = r.cid || '';
                 var viewUrl = GATEWAY + '/ipfs/' + encodeURIComponent(cidDisplay);
-                var title = r.title ? '<a class="result-title" href="' + viewUrl + '" target="_blank" rel="noopener">' + esc(r.title) + '</a>' : '';
+                var title = r.title ? '<a class="result-title" href="' + viewUrl + '" target="_blank">' + esc(r.title) + '</a>' : '';
                 var bf = r.broad_field || '', st = r.sub_topic || '';
                 var classHtml = '';
                 if (bf || st) {
@@ -482,14 +482,14 @@
                         '<div class="arch-meta" style="margin-top:6px;">' + (a.indexed || 0) + '/' + (a.doc_count || 0) + ' docs' +
                         (a.owner ? '<span>by ' + esc(a.owner) + '</span>' : '') + statusBadge(a.status) + '</div></div>' +
                         '<button class="btn" onclick="closeArchive()">CLOSE</button></div>';
-                    html += '<div class="arch-cid" style="margin-bottom:8px;"><a href="' + viewUrl + '" target="_blank" rel="noopener">' + esc(a.cid) + '</a></div>';
+                    html += '<div class="arch-cid" style="margin-bottom:8px;"><a href="' + viewUrl + '" target="_blank">' + esc(a.cid) + '</a></div>';
                     if (a.error) html += '<div style="color:#c62828; font-size:0.85em; margin-bottom:8px;">' + esc(a.error) + '</div>';
                     var kws = (a.top_keywords || []).map(function(k) { return '<span class="kw-tag" onclick="filterArch(\'' + escJs(k) + '\')">' + esc(k) + '</span>'; }).join('');
                     if (kws) html += '<div class="arch-kws" style="margin-bottom:12px;">' + kws + '</div>';
                     html += '<div style="margin-bottom:6px; text-transform:uppercase; font-size:0.85em; color:#555;">Documents</div>';
                     html += docs.map(function(r) {
                         var durl = GATEWAY + '/ipfs/' + encodeURIComponent(r.cid || '');
-                        var title = r.title ? '<a class="result-title" href="' + durl + '" target="_blank" rel="noopener">' + esc(r.title) + '</a>' : esc(r.cid);
+                        var title = r.title ? '<a class="result-title" href="' + durl + '" target="_blank">' + esc(r.title) + '</a>' : esc(r.cid);
                         var dkws = (r.keywords || []).map(function(k) { return '<span class="kw-tag">' + esc(k) + '</span>'; }).join('');
                         return '<div class="result-item">' + title + '<div class="result-cid">' + esc(r.cid || '') + '</div><div class="result-kws">' + dkws + '</div></div>';
                     }).join('');
