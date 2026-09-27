@@ -76,6 +76,9 @@ connection, so only expose the admin interface on a trusted network.
 
 The admin can:
 
+- **Replace the API key.** Saves `.api_key` in the data directory. Indexing and
+  admin login both use that key from then on (it overrides `SAIA_API_KEY`).
+  The current session stays signed in; the next login must use the new key.
 - **Toggle review mode.** When review mode is OFF (the default), submitted CIDs
   are classified and indexed immediately, as before. When it is ON, any user may
   still submit a CID, but it is parked in a review queue (kept out of the
@@ -111,6 +114,11 @@ The container persists all state under `/data` (the image runs with
 `-o /data` by default) and listens on port `8384`. Provide the API key via the
 `SAIA_API_KEY` environment variable, or mount a `.api_key` file into `/data`.
 
+`docker compose` runs a Kubo node beside the indexer. Fetches, archive crawls,
+and CID links use that node's RPC at `http://ipfs:5001` (`-ipfs-api`), not the
+HTTP gateway. UI links are same-origin (`/ipfs/...` on the indexer). Ports 5001
+and 8080 are not published.
+
 ```sh
 docker run -d --name cidindexer \
   -p 8384:8384 \
@@ -126,17 +134,44 @@ the binary), e.g. `... :latest -gateway https://dweb.link -workers 12`.
 
 ```yaml
 services:
+  ipfs:
+    image: ipfs/kubo
+    restart: unless-stopped
+    ports:
+      - 4001:4001/tcp
+      - 4001:4001/udp
+    volumes:
+      - ipfs-staging:/export
+      - ipfs-data:/data/ipfs
+    environment:
+      - IPFS_PROFILE=server
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   cidindexer:
     image: ghcr.io/gipplab/cid-indexer-ipfs:latest
     restart: unless-stopped
+    depends_on:
+      ipfs:
+        condition: service_healthy
     ports:
       - "8384:8384"
     environment:
       SAIA_API_KEY: "${SAIA_API_KEY}"
+    command:
+      - "-o=/data"
+      - "-ipfs-api=http://ipfs:5001"
     volumes:
       - cidindexer-data:/data
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
 
 volumes:
+  ipfs-staging:
+  ipfs-data:
   cidindexer-data:
 ```
 
@@ -153,6 +188,8 @@ An API key is required for indexing. The tool checks these locations in order:
 1. `.api_key` file in the data directory (`-o`, defaults to `./data`).
 2. `.api_key` file in the current working directory.
 3. `SAIA_API_KEY` environment variable.
+
+The admin page can replace the key by writing `.api_key` in the data directory.
 
 ## Usage
 
@@ -172,7 +209,9 @@ through the UI, which classifies each one and queues it for indexing.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `-o` | `data` | Data directory for the index, failures, archives, and moderation state (created if missing) |
-| `-gateway` | `https://ipfs.io` | IPFS gateway base URL |
+| `-gateway` | `https://ipfs.io` | IPFS gateway base URL used to fetch and crawl CIDs when `-ipfs-api` is empty |
+| `-ipfs-api` | | Kubo RPC base URL; when set, fetches and `/ipfs` links use the API instead of `-gateway` |
+| `-public-gateway` | | Absolute base URL for links in the web UI; empty serves `/ipfs` on this server |
 | `-workers` | `8` | Number of concurrent processing workers |
 | `-convert-rps` | `1` | Max concurrent PDF-convert requests |
 | `-rps` | `4` | Max keyword-extraction (chat) requests per second |

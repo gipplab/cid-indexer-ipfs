@@ -68,6 +68,16 @@
             </div>
 
             <div class="section">
+                <h3>API Key</h3>
+                <div class="muted" style="margin-bottom:10px;">Replaces the key used for indexing and for admin login. This session stays signed in. A job already running keeps the previous key until it finishes.</div>
+                <div class="row">
+                    <input type="password" id="newKeyInput" placeholder="New API key" autocomplete="off">
+                    <button class="btn" id="saveKeyBtn">SAVE</button>
+                </div>
+                <div id="keyStatus" class="status"></div>
+            </div>
+
+            <div class="section">
                 <div class="toolbar">
                     <h3 style="margin:0;">Pending Review <span id="subCount" style="color:#c62828;"></span></h3>
                     <button class="btn" id="refreshBtn">REFRESH</button>
@@ -153,6 +163,24 @@
 
         function logout() {
             fetch('/api/admin/logout', { method: 'POST' }).then(function() { checkSession(); });
+        }
+
+        function saveKey() {
+            var input = document.getElementById('newKeyInput');
+            var st = document.getElementById('keyStatus');
+            var key = input.value.trim();
+            if (!key) { st.className = 'status err'; st.textContent = 'Enter a key'; return; }
+            st.className = 'status'; st.textContent = 'Saving...';
+            var fd = new FormData(); fd.append('key', key);
+            fetch('/api/admin/api-key', { method: 'POST', body: fd })
+                .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+                .then(function(res) {
+                    if (!res.ok) { st.className = 'status err'; st.textContent = res.data.error || 'Failed'; return; }
+                    input.value = '';
+                    st.className = 'status ok';
+                    st.textContent = 'Saved. Next login uses this key.';
+                })
+                .catch(function() { st.className = 'status err'; st.textContent = 'Failed'; });
         }
 
         function toggleReview() {
@@ -270,6 +298,8 @@
         document.getElementById('keyInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') login(); });
         document.getElementById('logoutBtn').addEventListener('click', logout);
         document.getElementById('reviewToggle').addEventListener('click', toggleReview);
+        document.getElementById('saveKeyBtn').addEventListener('click', saveKey);
+        document.getElementById('newKeyInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') saveKey(); });
         document.getElementById('refreshBtn').addEventListener('click', loadSubmissions);
         document.getElementById('delArchiveBtn').addEventListener('click', function() { removeContent('archive', 'delArchiveCid'); });
         document.getElementById('delDocBtn').addEventListener('click', function() { removeContent('document', 'delDocCid'); });

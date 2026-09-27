@@ -108,6 +108,7 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 		APIBase:     cfg.APIBase,
 		Model:       cfg.Model,
 		Gateway:     cfg.Gateway,
+		IPFSAPI:     cfg.IPFSAPI,
 		Temperature: cfg.Temperature,
 		ConvertRPS:  cfg.ConvertRPS,
 		ChatRPS:     cfg.ChatRPS,
@@ -177,7 +178,7 @@ func indexArchive(store *Store, archiveCID, owner, apiKey string, cfg PipelineCo
 	} else {
 		store.MarkArchiveCrawling(archiveCID)
 
-		cr := newCrawler(cfg.Gateway, cfg.MaxDepth, cfg.MaxDocs)
+		cr := newCrawler(cfg.Gateway, cfg.IPFSAPI, cfg.MaxDepth, cfg.MaxDocs)
 		slog.Info("crawling archive", "cid", archiveCID)
 		crawled, err := cr.Crawl(archiveCID)
 		if err != nil {

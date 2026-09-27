@@ -72,6 +72,7 @@ type Pipeline struct {
 	APIBase     string
 	Model       string
 	Gateway     string
+	IPFSAPI     string // Kubo RPC; when set, fetches skip the HTTP gateway
 	Temperature float64
 	ConvertRPS  int           // /documents/convert requests per second (0 = default)
 	ChatRPS     int           // /chat/completions requests per second (0 = default)
@@ -243,6 +244,17 @@ func (p *Pipeline) Process(cid string) (*IndexEntry, error) {
 }
 
 func (p *Pipeline) fetchFromIPFS(cid string) ([]byte, bool, error) {
+	if p.IPFSAPI != "" {
+		data, err := kuboCat(p.IPFSAPI, cid, 0, fetchTimeout)
+		if err != nil {
+			return nil, false, fmt.Errorf("ipfs cat: %w", err)
+		}
+		if len(data) > maxFetchSize {
+			return nil, false, fmt.Errorf("file exceeds %d MB limit", maxFetchSize/(1024*1024))
+		}
+		isPDF := len(data) >= 4 && string(data[:4]) == "%PDF"
+		return data, isPDF, nil
+	}
 	reqURL := p.Gateway + "/ipfs/" + url.PathEscape(cid)
 	client := &http.Client{Timeout: fetchTimeout}
 	resp, err := client.Get(reqURL)

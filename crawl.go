@@ -52,15 +52,17 @@ type childEntry struct {
 	CID  string
 }
 
-// crawler enumerates document CIDs in an archive via an IPFS gateway.
+// crawler enumerates document CIDs in an archive.
+// api is a Kubo RPC base URL. When set, the HTTP gateway is not used.
 type crawler struct {
 	gateway  string
+	api      string
 	maxDepth int
 	maxDocs  int
 	client   *http.Client
 }
 
-func newCrawler(gateway string, maxDepth, maxDocs int) *crawler {
+func newCrawler(gateway, api string, maxDepth, maxDocs int) *crawler {
 	if maxDepth <= 0 {
 		maxDepth = defaultMaxDepth
 	}
@@ -69,6 +71,7 @@ func newCrawler(gateway string, maxDepth, maxDocs int) *crawler {
 	}
 	return &crawler{
 		gateway:  strings.TrimRight(gateway, "/"),
+		api:      strings.TrimRight(api, "/"),
 		maxDepth: maxDepth,
 		maxDocs:  maxDocs,
 		client:   &http.Client{Timeout: enumTimeout},
@@ -77,6 +80,9 @@ func newCrawler(gateway string, maxDepth, maxDocs int) *crawler {
 
 // Classify determines whether a CID is a directory, PDF, or other file.
 func (c *crawler) Classify(cid string) (nodeKind, error) {
+	if c.api != "" {
+		return c.classifyAPI(cid)
+	}
 	reqURL := c.gateway + "/ipfs/" + url.PathEscape(cid)
 	req, err := http.NewRequest(http.MethodGet, reqURL, nil)
 	if err != nil {
@@ -209,8 +215,44 @@ func (c *crawler) Crawl(rootCID string) ([]string, error) {
 	return order, nil
 }
 
+func (c *crawler) classifyAPI(cid string) (nodeKind, error) {
+	links, err := kuboLS(c.api, cid, classifyTimeout)
+	if err != nil {
+		return kindUnknown, err
+	}
+	if len(links) > 0 {
+		return kindDir, nil
+	}
+	peek, err := kuboCat(c.api, cid, classifyPeek, classifyTimeout)
+	if kuboIsDir(err) {
+		return kindDir, nil
+	}
+	if err != nil {
+		return kindUnknown, err
+	}
+	if len(peek) >= 4 && string(peek[:4]) == "%PDF" {
+		return kindPDF, nil
+	}
+	return kindOther, nil
+}
+
+func (c *crawler) enumerateAPI(cid string) ([]childEntry, error) {
+	links, err := kuboLS(c.api, cid, enumTimeout)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]childEntry, 0, len(links))
+	for _, l := range links {
+		out = append(out, childEntry{Name: l.Name, CID: l.CID})
+	}
+	return out, nil
+}
+
 // enumerateDir lists immediate children, trying dag-json first then HTML fallback.
 func (c *crawler) enumerateDir(cid string) ([]childEntry, error) {
+	if c.api != "" {
+		return c.enumerateAPI(cid)
+	}
 	if children, err := c.enumerateDagJSON(cid); err == nil && len(children) > 0 {
 		return children, nil
 	}

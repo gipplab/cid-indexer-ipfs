@@ -7,8 +7,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -100,6 +103,17 @@ func (ss *sessionStore) destroy(tok string) {
 	ss.mu.Unlock()
 }
 
+// retain drops every session except tok.
+func (ss *sessionStore) retain(tok string) {
+	ss.mu.Lock()
+	defer ss.mu.Unlock()
+	exp, ok := ss.sessions[tok]
+	ss.sessions = make(map[string]time.Time)
+	if ok {
+		ss.sessions[tok] = exp
+	}
+}
+
 // authed reports whether the request carries a valid admin session cookie.
 func (ss *sessionStore) authed(r *http.Request) bool {
 	c, err := r.Cookie(sessionCookie)
@@ -112,6 +126,72 @@ func (ss *sessionStore) authed(r *http.Request) bool {
 type searchResult struct {
 	IndexEntry
 	ArchiveRefs []ArchiveRef `json:"archive_refs,omitempty"`
+}
+
+// gatewayProxy forwards /ipfs and /ipns requests to the fetch gateway so the
+// web UI can link to CIDs without sending the browser to a public gateway.
+func gatewayProxy(gateway string) http.Handler {
+	target, err := url.Parse(strings.TrimRight(gateway, "/"))
+	if err != nil || target.Scheme == "" || target.Host == "" {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "gateway proxy is not configured", http.StatusBadGateway)
+		})
+	}
+	return &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			slog.Error("gateway proxy failed", "path", r.URL.RequestURI(), "error", err)
+			http.Error(w, "gateway unavailable", http.StatusBadGateway)
+		},
+	}
+}
+
+// ipfsAPIProxy serves /ipfs/<path> from the Kubo RPC (cat for files, ls for directories).
+func ipfsAPIProxy(api string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		p := strings.Trim(strings.TrimPrefix(r.URL.Path, "/ipfs/"), "/")
+		if p == "" || strings.Contains(p, "..") {
+			http.Error(w, "missing cid", http.StatusBadRequest)
+			return
+		}
+		if r.Method == http.MethodHead {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		body, err := kuboCatStream(api, p, 0, 10*time.Minute)
+		if kuboIsDir(err) {
+			links, lerr := kuboLS(api, p, enumTimeout)
+			if lerr != nil {
+				http.Error(w, lerr.Error(), http.StatusBadGateway)
+				return
+			}
+			writeKuboDir(w, links)
+			return
+		}
+		if err != nil {
+			slog.Error("ipfs cat failed", "path", p, "error", err)
+			http.Error(w, "ipfs api unavailable", http.StatusBadGateway)
+			return
+		}
+		defer body.Close()
+		buf := make([]byte, 4)
+		n, _ := io.ReadFull(body, buf)
+		if n >= 4 && string(buf[:4]) == "%PDF" {
+			w.Header().Set("Content-Type", "application/pdf")
+		} else {
+			w.Header().Set("Content-Type", "application/octet-stream")
+		}
+		if n > 0 {
+			w.Write(buf[:n])
+		}
+		io.Copy(w, body)
+	})
 }
 
 func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error {
@@ -128,14 +208,22 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 		}
 	}
 
+	if cfg.IPFSAPI != "" {
+		mux.Handle("/ipfs/", ipfsAPIProxy(cfg.IPFSAPI))
+	} else {
+		proxy := gatewayProxy(cfg.Gateway)
+		mux.Handle("/ipfs/", proxy)
+		mux.Handle("/ipns/", proxy)
+	}
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(renderPage("dashboard", cfg.Gateway)))
+		w.Write([]byte(renderPage("dashboard", cfg.linkGateway())))
 	})
 
 	mux.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(renderPage("admin", cfg.Gateway)))
+		w.Write([]byte(renderPage("admin", cfg.linkGateway())))
 	})
 
 	mux.HandleFunc("/api/search", func(w http.ResponseWriter, r *http.Request) {
@@ -219,7 +307,7 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 			return
 		}
 
-		cr := newCrawler(cfg.Gateway, cfg.MaxDepth, cfg.MaxDocs)
+		cr := newCrawler(cfg.Gateway, cfg.IPFSAPI, cfg.MaxDepth, cfg.MaxDocs)
 		kind, err := cr.Classify(cid)
 		if err != nil {
 			writeJSONError(w, "could not fetch CID from gateway: "+err.Error(), http.StatusBadGateway)
@@ -400,6 +488,28 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 		})
 	}))
 
+	mux.HandleFunc("/api/admin/api-key", requireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		key := strings.TrimSpace(r.FormValue("key"))
+		if key == "" || strings.ContainsAny(key, "\r\n") {
+			writeJSONError(w, "invalid API key", http.StatusBadRequest)
+			return
+		}
+		if err := saveAPIKey(cfg.DataDir, key); err != nil {
+			slog.Error("failed to save API key", "error", err)
+			writeJSONError(w, "could not save API key", http.StatusInternalServerError)
+			return
+		}
+		if c, err := r.Cookie(sessionCookie); err == nil {
+			sessions.retain(c.Value)
+		}
+		slog.Info("API key updated")
+		writeJSON(w, map[string]interface{}{"message": "API key updated"})
+	}))
+
 	mux.HandleFunc("/api/admin/review-mode", requireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -490,10 +600,12 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 	}))
 
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		// Kubo may spend a while retrieving a CID before the body starts.
+		WriteTimeout: 0,
 		IdleTimeout:  120 * time.Second,
 	}
 

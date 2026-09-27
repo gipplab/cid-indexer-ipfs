@@ -1,23 +1,40 @@
 services:
+  ipfs:
+    image: ipfs/kubo
+    restart: unless-stopped
+    ports:
+      - 4001:4001/tcp
+      - 4001:4001/udp
+    volumes:
+      - ipfs-staging:/export
+      - ipfs-data:/data/ipfs
+    environment:
+      - IPFS_PROFILE=server
+    healthcheck:
+      test: ["CMD-SHELL", "ipfs id || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   cidindexer:
     image: ghcr.io/gipplab/cid-indexer-ipfs:latest
     restart: unless-stopped
+    depends_on:
+      ipfs:
+        condition: service_healthy
     ports:
       - "8384:8384"
     environment:
       SAIA_API_KEY: "your-key-here"
-    # Conservative throughput so the strictly rate-limited SAIA endpoints
-    # (especially /chat/completions, which has a token/request quota) are not
-    # overrun. Raise these only if you confirm headroom; lower -max-text first
-    # if you hit token-per-minute limits, since it directly cuts tokens/request.
     command:
       - "-o=/data"
-      - "-workers=3"
-      - "-convert-rps=1"
-      - "-rps=1"
-      - "-max-text=8000"
+      - "-ipfs-api=http://ipfs:5001"
     volumes:
       - cidindexer-data:/data
+    labels:
+      - com.centurylinklabs.watchtower.enable=true
 
 volumes:
+  ipfs-staging:
+  ipfs-data:
   cidindexer-data:

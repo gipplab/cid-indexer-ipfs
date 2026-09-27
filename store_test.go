@@ -166,6 +166,23 @@ func TestDeleteArchiveKeepsSharedDocs(t *testing.T) {
 	_ = res
 }
 
+func TestSaveAPIKeyOverridesEnv(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("SAIA_API_KEY", "from-env")
+	if got := loadAPIKey(dir); got != "from-env" {
+		t.Fatalf("loadAPIKey = %q, want env key", got)
+	}
+	if err := saveAPIKey(dir, "from-file"); err != nil {
+		t.Fatal(err)
+	}
+	if got := loadAPIKey(dir); got != "from-file" {
+		t.Fatalf("loadAPIKey = %q, want file key", got)
+	}
+	if err := saveAPIKey(dir, "  "); err == nil {
+		t.Fatal("empty key should be rejected")
+	}
+}
+
 func TestFailuresAndRetry(t *testing.T) {
 	s := newTestStore(t)
 	for i := 0; i < maxRetries; i++ {
