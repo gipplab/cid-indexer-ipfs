@@ -128,8 +128,8 @@ type searchResult struct {
 	ArchiveRefs []ArchiveRef `json:"archive_refs,omitempty"`
 }
 
-// gatewayProxy forwards /ipfs and /ipns requests to the fetch gateway so the
-// web UI can link to CIDs without sending the browser to a public gateway.
+// gatewayProxy forwards /ipfs requests for an already-indexed CID to the fetch
+// gateway. Callers must refuse unknown CIDs before invoking it.
 func gatewayProxy(gateway string) http.Handler {
 	target, err := url.Parse(strings.TrimRight(gateway, "/"))
 	if err != nil || target.Scheme == "" || target.Host == "" {
@@ -146,6 +146,44 @@ func gatewayProxy(gateway string) http.Handler {
 			http.Error(w, "gateway unavailable", http.StatusBadGateway)
 		},
 	}
+}
+
+// indexedIPFS serves next only when the first CID in the path is in the index.
+// A path under that CID stays inside its DAG. Any other CID is refused before
+// Kubo or a gateway is contacted.
+func indexedIPFS(store *Store, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		root, ok := indexedIPFSRoot(r.URL.Path)
+		if !ok || !store.IndexedCID(root) {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func indexedIPFSRoot(path string) (string, bool) {
+	p := strings.Trim(strings.TrimPrefix(path, "/ipfs/"), "/")
+	if p == "" || strings.Contains(p, "..") {
+		return "", false
+	}
+	root := p
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		root = p[:i]
+	}
+	if len(root) < 10 || len(root) > 128 {
+		return "", false
+	}
+	for _, r := range root {
+		if (r < '0' || r > '9') && (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') {
+			return "", false
+		}
+	}
+	return root, true
 }
 
 // ipfsAPIProxy serves /ipfs/<path> from the Kubo RPC (cat for files, ls for directories).
@@ -171,7 +209,7 @@ func ipfsAPIProxy(api string) http.Handler {
 				http.Error(w, lerr.Error(), http.StatusBadGateway)
 				return
 			}
-			writeKuboDir(w, links)
+			writeKuboDir(w, p, links)
 			return
 		}
 		if err != nil {
@@ -206,11 +244,9 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 	}
 
 	if cfg.IPFSAPI != "" {
-		mux.Handle("/ipfs/", ipfsAPIProxy(cfg.IPFSAPI))
+		mux.Handle("/ipfs/", indexedIPFS(store, ipfsAPIProxy(cfg.IPFSAPI)))
 	} else {
-		proxy := gatewayProxy(cfg.Gateway)
-		mux.Handle("/ipfs/", proxy)
-		mux.Handle("/ipns/", proxy)
+		mux.Handle("/ipfs/", indexedIPFS(store, gatewayProxy(cfg.Gateway)))
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {

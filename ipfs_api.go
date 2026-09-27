@@ -125,11 +125,36 @@ func kuboCatStream(api, ipfsPath string, n int64, timeout time.Duration) (io.Rea
 	return resp.Body, nil
 }
 
-func writeKuboDir(w http.ResponseWriter, links []kuboLink) {
+func ipfsPathHref(base, name string) string {
+	var b strings.Builder
+	b.WriteString("/ipfs/")
+	first := true
+	for _, seg := range strings.Split(base, "/") {
+		if seg == "" {
+			continue
+		}
+		if !first {
+			b.WriteByte('/')
+		}
+		first = false
+		b.WriteString(url.PathEscape(seg))
+	}
+	if !first {
+		b.WriteByte('/')
+	}
+	b.WriteString(url.PathEscape(name))
+	return b.String()
+}
+
+func writeKuboDir(w http.ResponseWriter, base string, links []kuboLink) {
 	var b strings.Builder
 	b.WriteString("<!DOCTYPE html><html><body><ul>")
+	base = strings.Trim(base, "/")
 	for _, l := range links {
-		fmt.Fprintf(&b, `<li><a href="/ipfs/%s">%s</a></li>`, url.PathEscape(l.CID), html.EscapeString(l.Name))
+		if l.Name == "" || l.Name == "." || l.Name == ".." || strings.ContainsAny(l.Name, "/\\") {
+			continue
+		}
+		fmt.Fprintf(&b, `<li><a href="%s">%s</a></li>`, ipfsPathHref(base, l.Name), html.EscapeString(l.Name))
 	}
 	b.WriteString("</ul></body></html>")
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

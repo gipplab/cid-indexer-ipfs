@@ -96,6 +96,19 @@ func (s *Store) updateArchive(query string, args ...interface{}) {
 	}
 }
 
+// IndexedCID reports whether cid is a document, an archive, or a member of an
+// archive in this index. The /ipfs handler uses it so the process does not
+// fetch arbitrary CIDs.
+func (s *Store) IndexedCID(cid string) bool {
+	var n int
+	err := s.db.QueryRow(`
+SELECT 1 FROM documents WHERE cid=?
+UNION SELECT 1 FROM archives WHERE cid=?
+UNION SELECT 1 FROM archive_docs WHERE doc_cid=?
+LIMIT 1`, cid, cid, cid).Scan(&n)
+	return err == nil && n == 1
+}
+
 // SetArchiveDocs records the document CIDs discovered by the crawler (in order)
 // and moves the archive into the indexing state.
 func (s *Store) SetArchiveDocs(cid string, docCIDs []string) {

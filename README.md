@@ -116,8 +116,9 @@ The container persists all state under `/data` (the image runs with
 
 `docker compose` runs a Kubo node beside the indexer. Fetches, archive crawls,
 and CID links use that node's RPC at `http://ipfs:5001` (`-ipfs-api`), not the
-HTTP gateway. UI links are same-origin (`/ipfs/...` on the indexer). Ports 5001
-and 8080 are not published.
+HTTP gateway. UI links are same-origin (`/ipfs/...` on the indexer) and only
+resolve a CID that is already a document, an archive, or a member of an
+archive in the index. Ports 5001 and 8080 are not published.
 
 ```sh
 docker run -d --name cidindexer \

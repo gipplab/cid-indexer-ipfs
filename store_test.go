@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -180,6 +182,43 @@ func TestSaveAPIKeyOverridesEnv(t *testing.T) {
 	}
 	if err := saveAPIKey(dir, "  "); err == nil {
 		t.Fatal("empty key should be rejected")
+	}
+}
+
+func TestIndexedIPFSRefusesUnknownCID(t *testing.T) {
+	s := newTestStore(t)
+	doc := "QmDocCID11111111111111111111111111111111111"
+	arch := "QmArchCID111111111111111111111111111111111"
+	member := "QmMemCID1111111111111111111111111111111111"
+	other := "QmOtherCID11111111111111111111111111111111"
+	s.Add(mkEntry(doc, "Title", "Computer Science", "Systems", "ipfs"))
+	s.AddArchive(arch, "lab")
+	s.SetArchiveDocs(arch, []string{member})
+
+	if !s.IndexedCID(doc) || !s.IndexedCID(arch) || !s.IndexedCID(member) {
+		t.Fatal("indexed document, archive, and member should be allowed")
+	}
+	if s.IndexedCID(other) {
+		t.Fatal("unknown CID should not be indexed")
+	}
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	h := indexedIPFS(s, next)
+	for _, path := range []string{"/ipfs/" + doc, "/ipfs/" + arch, "/ipfs/" + member, "/ipfs/" + arch + "/paper.pdf"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200", path, rec.Code)
+		}
+	}
+	for _, path := range []string{"/ipfs/" + other, "/ipfs/" + other + "/file", "/ipfs/../" + doc, "/ipfs/short"} {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("%s status = %d, want 404", path, rec.Code)
+		}
 	}
 }
 
