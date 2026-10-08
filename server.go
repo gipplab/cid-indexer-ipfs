@@ -229,7 +229,7 @@ func ipfsAPIProxy(api string) http.Handler {
 	})
 }
 
-func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error {
+func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer, dn *dnState) error {
 	mux := http.NewServeMux()
 	sessions := newSessionStore()
 
@@ -309,8 +309,13 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 		stats := store.Stats()
 		stats.Indexing = indexingActive.Load()
 		stats.Queued = ix.Queued()
-		stats.Model = cfg.Model
-		stats.APIBase = cfg.APIBase
+		if llm, err := resolveLLM(store, cfg); err == nil {
+			stats.Model = llm.Model
+			stats.APIBase = llm.APIBase
+		} else {
+			stats.Model = cfg.Model
+			stats.APIBase = cfg.APIBase
+		}
 		writeJSON(w, stats)
 	})
 
@@ -419,6 +424,29 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 		})
 	})
 
+	mux.HandleFunc("/api/datanetwork", func(w http.ResponseWriter, r *http.Request) {
+		datasets := store.Datanetwork()
+		if datasets == nil {
+			datasets = []NetworkDataset{}
+		}
+		pageURL, errMsg, syncing := "", "", false
+		if dn != nil {
+			pageURL, errMsg, syncing = dn.snapshot()
+		}
+		files := 0
+		for _, d := range datasets {
+			files += d.FileCount
+		}
+		writeJSON(w, map[string]interface{}{
+			"url":           pageURL,
+			"error":         errMsg,
+			"syncing":       syncing,
+			"datasets":      datasets,
+			"dataset_count": len(datasets),
+			"file_count":    files,
+		})
+	})
+
 	mux.HandleFunc("/api/archives", func(w http.ResponseWriter, r *http.Request) {
 		archives := store.Archives()
 		if archives == nil {
@@ -462,14 +490,10 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 			writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		adminKey := loadAPIKey(cfg.DataDir)
-		if adminKey == "" {
-			writeJSONError(w, "no API key configured on the server", http.StatusServiceUnavailable)
-			return
-		}
-		key := strings.TrimSpace(r.FormValue("key"))
-		if subtle.ConstantTimeCompare([]byte(key), []byte(adminKey)) != 1 {
-			writeJSONError(w, "invalid key", http.StatusUnauthorized)
+		password := loadAdminPassword(cfg.DataDir)
+		submitted := strings.TrimSpace(r.FormValue("password"))
+		if password != "" && subtle.ConstantTimeCompare([]byte(submitted), []byte(password)) != 1 {
+			writeJSONError(w, "invalid password", http.StatusUnauthorized)
 			return
 		}
 		tok, err := sessions.create()
@@ -506,6 +530,7 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 		writeJSON(w, map[string]interface{}{
 			"authed":         sessions.authed(r),
 			"review_enabled": store.ReviewEnabled(),
+			"password_set":   loadAdminPassword(cfg.DataDir) != "",
 		})
 	})
 
@@ -521,26 +546,53 @@ func startServer(store *Store, port int, cfg PipelineConfig, ix *Indexer) error 
 		})
 	}))
 
-	mux.HandleFunc("/api/admin/api-key", requireAdmin(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/admin/password", requireAdmin(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		key := strings.TrimSpace(r.FormValue("key"))
-		if key == "" || strings.ContainsAny(key, "\r\n") {
-			writeJSONError(w, "invalid API key", http.StatusBadRequest)
+		password := strings.TrimSpace(r.FormValue("password"))
+		if password == "" || strings.ContainsAny(password, "\r\n") {
+			writeJSONError(w, "invalid password", http.StatusBadRequest)
 			return
 		}
-		if err := saveAPIKey(cfg.DataDir, key); err != nil {
-			slog.Error("failed to save API key", "error", err)
-			writeJSONError(w, "could not save API key", http.StatusInternalServerError)
+		if err := saveAdminPassword(cfg.DataDir, password); err != nil {
+			slog.Error("failed to save admin password", "error", err)
+			writeJSONError(w, "could not save password", http.StatusInternalServerError)
 			return
 		}
 		if c, err := r.Cookie(sessionCookie); err == nil {
 			sessions.retain(c.Value)
 		}
-		slog.Info("API key updated")
-		writeJSON(w, map[string]interface{}{"message": "API key updated"})
+		slog.Info("admin password updated")
+		writeJSON(w, map[string]interface{}{"message": "password updated", "password_set": true})
+	}))
+
+	mux.HandleFunc("/api/admin/llm", requireAdmin(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, store.LLMViewForAdmin(cfg))
+		case http.MethodPost:
+			form := LLMForm{
+				Provider:      r.FormValue("provider"),
+				AcademicKey:   r.FormValue("academic_key"),
+				AcademicModel: r.FormValue("academic_model"),
+				GoogleKey:     r.FormValue("google_key"),
+				GoogleModel:   r.FormValue("google_model"),
+				LocalBase:     r.FormValue("local_base"),
+				LocalModel:    r.FormValue("local_model"),
+				LocalKey:      r.FormValue("local_key"),
+			}
+			got, err := store.SaveLLM(cfg, form)
+			if err != nil {
+				writeJSONError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			slog.Info("language model updated", "provider", got.Provider, "model", got.Model)
+			writeJSON(w, store.LLMViewForAdmin(cfg))
+		default:
+			writeJSONError(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	}))
 
 	mux.HandleFunc("/api/admin/review-mode", requireAdmin(func(w http.ResponseWriter, r *http.Request) {

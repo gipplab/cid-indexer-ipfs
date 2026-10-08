@@ -48,6 +48,7 @@ func kuboIsDir(err error) bool {
 type kuboLink struct {
 	Name string
 	CID  string
+	Size int64
 	Dir  bool
 }
 
@@ -72,6 +73,7 @@ func kuboLS(api, ipfsPath string, timeout time.Duration) ([]kuboLink, error) {
 			Links []struct {
 				Name string          `json:"Name"`
 				Hash string          `json:"Hash"`
+				Size int64           `json:"Size"`
 				Type json.RawMessage `json:"Type"`
 			} `json:"Links"`
 		} `json:"Objects"`
@@ -87,7 +89,7 @@ func kuboLS(api, ipfsPath string, timeout time.Duration) ([]kuboLink, error) {
 		if l.Hash == "" {
 			continue
 		}
-		out = append(out, kuboLink{Name: l.Name, CID: l.Hash, Dir: kuboTypeDir(l.Type)})
+		out = append(out, kuboLink{Name: l.Name, CID: l.Hash, Size: l.Size, Dir: kuboTypeDir(l.Type)})
 	}
 	return out, nil
 }

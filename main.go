@@ -53,14 +53,17 @@ func main() {
 		maxDepth      = flag.Int("max-depth", defaultMaxDepth, "max directory recursion depth when crawling an archive")
 		maxDocs       = flag.Int("max-docs", defaultMaxDocs, "max documents to discover per archive crawl")
 		port          = flag.Int("port", defaultPort, "web UI port")
+		datanetwork   = flag.String("datanetwork", defaultDatanetworkURL, "public datanetwork readout to catalog; empty disables")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [flags]\n\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Indexes PDF documents from IPFS by extracting keywords and metadata\n")
 		fmt.Fprintf(os.Stderr, "via an OpenAI-compatible LLM API.\n\n")
-		fmt.Fprintf(os.Stderr, "Starts a web UI for searching and submitting document or archive CIDs.\n\n")
+		fmt.Fprintf(os.Stderr, "Starts a web UI for searching and submitting document or archive CIDs.\n")
+		fmt.Fprintf(os.Stderr, "With -datanetwork set, also lists every file in the IOSP datanetwork.\n\n")
 		fmt.Fprintf(os.Stderr, "API key (required for indexing):\n")
-		fmt.Fprintf(os.Stderr, "  Read from .api_key file (in -o dir, then cwd), or SAIA_API_KEY env var.\n\n")
+		fmt.Fprintf(os.Stderr, "  Set in the admin language-model settings, or read from .api_key\n")
+		fmt.Fprintf(os.Stderr, "  (in -o dir, then cwd) or SAIA_API_KEY. The admin password is separate.\n\n")
 		fmt.Fprintf(os.Stderr, "Flags:\n")
 		flag.PrintDefaults()
 	}
@@ -98,24 +101,49 @@ func main() {
 		}
 	}
 
-	if err := startServer(store, *port, cfg, indexer); err != nil {
+	dn := &dnState{}
+	if page := strings.TrimSpace(*datanetwork); page != "" {
+		slog.Info("cataloging datanetwork", "url", page)
+		go runDatanetworkSync(store, cfg, indexer, page, dn)
+	}
+
+	if err := startServer(store, *port, cfg, indexer, dn); err != nil {
 		slog.Error("server error", "error", err)
 		os.Exit(1)
 	}
 }
 
-// saveAPIKey writes .api_key in the data dir. That file is checked before the
-// SAIA_API_KEY env var, so it becomes the key for indexing and admin login.
+// saveAPIKey writes .api_key in the data dir. That file is an indexing key,
+// checked before SAIA_API_KEY. It is not the admin password.
 func saveAPIKey(dataDir, key string) error {
-	key = strings.TrimSpace(key)
-	if key == "" || strings.ContainsAny(key, "\r\n") {
-		return fmt.Errorf("invalid API key")
+	return writeSecret(dataDir, ".api_key", key)
+}
+
+// loadAdminPassword reads the admin password from the data dir. An empty
+// result means the admin page is open until a password is set.
+func loadAdminPassword(dataDir string) string {
+	data, err := os.ReadFile(filepath.Join(dataDir, ".admin_password"))
+	if err != nil {
+		return ""
 	}
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	return strings.TrimSpace(string(data))
+}
+
+// saveAdminPassword stores the admin password. Later logins must match it.
+func saveAdminPassword(dataDir, password string) error {
+	return writeSecret(dataDir, ".admin_password", password)
+}
+
+func writeSecret(dir, name, value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" || strings.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("invalid secret")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	path := filepath.Join(dataDir, ".api_key")
-	tmp, err := os.CreateTemp(dataDir, ".api_key.*")
+	path := filepath.Join(dir, name)
+	tmp, err := os.CreateTemp(dir, name+".*")
 	if err != nil {
 		return err
 	}
@@ -130,7 +158,7 @@ func saveAPIKey(dataDir, key string) error {
 		tmp.Close()
 		return err
 	}
-	if _, err := tmp.WriteString(key + "\n"); err != nil {
+	if _, err := tmp.WriteString(value + "\n"); err != nil {
 		tmp.Close()
 		return err
 	}

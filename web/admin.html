@@ -13,42 +13,29 @@
         .section h3 { margin: 0 0 12px; text-transform: uppercase; font-size: 1em; }
         .btn { background: none; border: 1px solid #999; cursor: pointer; font-family: inherit; font-size: 0.85em; padding: 5px 12px; text-transform: uppercase; color: #333; }
         .btn:hover { background: #eee; border-color: #333; }
-        .btn:disabled { opacity: 0.4; cursor: default; }
-        .btn-allow { border-color: #2e7d32; color: #2e7d32; }
-        .btn-allow:hover { background: #e8f5e9; }
-        .btn-deny { border-color: #c62828; color: #c62828; }
-        .btn-deny:hover { background: #ffebee; }
-        input[type=text], input[type=password] { padding: 10px 12px; border: 1px solid #333; font-family: inherit; font-size: 0.95em; width: 100%; }
+        input[type=password], input[type=text] { padding: 10px 12px; border: 1px solid #333; font-family: inherit; font-size: 0.95em; width: 100%; }
+        label.choice { display: flex; gap: 8px; align-items: center; margin: 8px 0; cursor: pointer; }
+        .provider { margin: 8px 0 14px 22px; display: none; }
+        .provider.open { display: block; }
+        .field { margin-top: 8px; }
         .row { display: flex; gap: 10px; align-items: center; }
-        .sub-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid #eee; font-size: 0.88em; }
-        .sub-main { flex: 1; min-width: 0; }
-        .sub-cid { font-family: monospace; word-break: break-all; }
-        .kind-tag { display: inline-block; padding: 1px 8px; font-size: 0.72em; text-transform: uppercase; border: 1px solid; border-radius: 2px; margin-top: 3px; }
-        .kind-archive { background: #e3f2fd; border-color: #90caf9; color: #1565c0; }
-        .kind-document { background: #f3e5f5; border-color: #ce93d8; color: #7b1fa2; }
         .status { font-size: 0.85em; margin-top: 8px; min-height: 1.2em; }
         .status.err { color: #c62828; }
         .status.ok { color: #2e7d32; }
-        .toggle-state { font-weight: 700; }
         .muted { color: #888; font-size: 0.8em; }
         .toolbar { display: flex; justify-content: space-between; align-items: center; }
-        .fail-row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 0; border-bottom: 1px solid #eee; font-size: 0.85em; }
-        .fail-main { flex: 1; min-width: 0; }
-        .fail-cid { font-family: monospace; word-break: break-all; color: #555; }
-        .fail-reason { color: #c62828; font-size: 0.9em; margin-top: 2px; word-break: break-word; }
-        .btn-retry { flex: 0 0 auto; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>CID Indexer - Admin</h1>
-        <div class="muted" style="margin-bottom:10px;"><a href="/">&larr; Back to search</a></div>
+        <div class="muted" style="margin-bottom:10px;"><a href="/">&larr; Back</a></div>
 
         <div class="section" id="loginSection" style="display:none;">
             <h3>Admin Login</h3>
-            <div class="muted" style="margin-bottom:10px;">Log in with the server's API key. Sent over the local connection; use only on a trusted network.</div>
-            <div class="row">
-                <input type="password" id="keyInput" placeholder="API key" autocomplete="off">
+            <div class="muted" id="loginHint" style="margin-bottom:10px;">No password is set. Opening the admin page.</div>
+            <div class="row" id="loginRow" style="display:none;">
+                <input type="password" id="passwordInput" placeholder="Password" autocomplete="current-password">
                 <button class="btn" id="loginBtn">LOGIN</button>
             </div>
             <div id="loginStatus" class="status"></div>
@@ -57,255 +44,192 @@
         <div id="adminView" style="display:none;">
             <div class="section">
                 <div class="toolbar">
-                    <h3 style="margin:0;">Review Mode</h3>
+                    <h3 style="margin:0;">Change Password</h3>
                     <button class="btn" id="logoutBtn">LOGOUT</button>
                 </div>
-                <div style="margin-top:10px;" class="row">
-                    <span>Status: <span class="toggle-state" id="reviewState">--</span></span>
-                    <button class="btn" id="reviewToggle">TOGGLE</button>
-                </div>
-                <div class="muted" style="margin-top:8px;">When ON, user submissions are held below for review and are not indexed until approved.</div>
-            </div>
-
-            <div class="section">
-                <h3>API Key</h3>
-                <div class="muted" style="margin-bottom:10px;">Replaces the key used for indexing and for admin login. This session stays signed in. A job already running keeps the previous key until it finishes.</div>
+                <div class="muted" id="passwordHint" style="margin:10px 0;">No password is set. Set one here; until then this page stays open.</div>
                 <div class="row">
-                    <input type="password" id="newKeyInput" placeholder="New API key" autocomplete="off">
-                    <button class="btn" id="saveKeyBtn">SAVE</button>
+                    <input type="password" id="newPasswordInput" placeholder="New password" autocomplete="new-password">
+                    <button class="btn" id="savePasswordBtn">SAVE</button>
                 </div>
-                <div id="keyStatus" class="status"></div>
+                <div id="passwordStatus" class="status"></div>
             </div>
 
             <div class="section">
-                <div class="toolbar">
-                    <h3 style="margin:0;">Pending Review <span id="subCount" style="color:#c62828;"></span></h3>
-                    <button class="btn" id="refreshBtn">REFRESH</button>
+                <h3>Language model</h3>
+                <div class="muted">Choose which model indexes PDFs. A blank key keeps the one already saved.</div>
+                <label class="choice"><input type="radio" name="provider" value="academic"> Academic Cloud</label>
+                <div class="provider" id="prov-academic">
+                    <div class="muted">https://chat-ai.academiccloud.de/v1 — enter that service's API key. PDFs are converted, then labeled.</div>
+                    <div class="field"><input type="password" id="academicKey" placeholder="API key (blank keeps the current one)" autocomplete="off"></div>
+                    <div class="field"><input type="text" id="academicModel" placeholder="Model" autocomplete="off"></div>
                 </div>
-                <div id="subList" style="margin-top:10px;"></div>
-                <div id="subStatus" class="status"></div>
-            </div>
-
-            <div class="section">
-                <h3>Remove Content</h3>
-                <div class="muted" style="margin-bottom:10px;">Remove an archive (orphaned member documents are deleted; shared documents are kept) or an individual document from the index.</div>
-                <div class="row" style="margin-bottom:8px;">
-                    <input type="text" id="delArchiveCid" placeholder="Archive CID to remove" autocomplete="off">
-                    <button class="btn btn-deny" id="delArchiveBtn">REMOVE</button>
+                <label class="choice"><input type="radio" name="provider" value="google"> Google AI Studio</label>
+                <div class="provider" id="prov-google">
+                    <div class="muted">A key from aistudio.google.com. The PDF is sent to Gemini.</div>
+                    <div class="field"><input type="password" id="googleKey" placeholder="API key (blank keeps the current one)" autocomplete="off"></div>
+                    <div class="field"><input type="text" id="googleModel" placeholder="Model" autocomplete="off"></div>
                 </div>
-                <div class="row">
-                    <input type="text" id="delDocCid" placeholder="Document CID to remove" autocomplete="off">
-                    <button class="btn btn-deny" id="delDocBtn">REMOVE</button>
+                <label class="choice"><input type="radio" name="provider" value="local"> Local LLM</label>
+                <div class="provider" id="prov-local">
+                    <div class="muted">An OpenAI-compatible server on this machine, such as Ollama. It does not read PDFs.</div>
+                    <div class="field"><input type="text" id="localBase" placeholder="Base URL" autocomplete="off"></div>
+                    <div class="field"><input type="text" id="localModel" placeholder="Model name" autocomplete="off"></div>
+                    <div class="field"><input type="password" id="localKey" placeholder="API key, if the server requires one" autocomplete="off"></div>
                 </div>
-                <div id="delStatus" class="status"></div>
-            </div>
-
-            <div class="section">
-                <div class="toolbar">
-                    <h3 style="margin:0;">Failed Documents <span id="failCount" style="color:#c62828;"></span></h3>
-                    <button class="btn" id="retryAllBtn">RETRY ALL</button>
-                </div>
-                <div class="muted" style="margin:8px 0;">These CIDs failed indexing after repeated attempts. Retry to re-queue them (e.g. after raising -convert-timeout).</div>
-                <div id="failList"><div class="muted">No failed documents.</div></div>
+                <div style="margin-top:12px;"><button class="btn" id="saveLLMBtn">SAVE</button></div>
+                <div id="llmStatus" class="status"></div>
             </div>
         </div>
     </div>
     <script>
-        var GATEWAY = '{{.Gateway}}';
-        var reviewEnabled = false;
-
-        function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
-        function escJs(t) { return t ? t.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"') : ''; }
-
         var loginSection = document.getElementById('loginSection');
         var adminView = document.getElementById('adminView');
+        var openAttempt = false;
 
         function checkSession() {
             fetch('/api/admin/session?t=' + Date.now())
                 .then(function(r) { return r.json(); })
                 .then(function(d) {
-                    reviewEnabled = !!d.review_enabled;
                     if (d.authed) {
                         loginSection.style.display = 'none';
                         adminView.style.display = '';
-                        renderReviewState();
-                        loadSubmissions();
-                        loadFailures();
-                    } else {
-                        loginSection.style.display = '';
-                        adminView.style.display = 'none';
+                        var hint = document.getElementById('passwordHint');
+                        hint.textContent = d.password_set
+                            ? 'The next login must use the new password. This session stays signed in.'
+                            : 'No password is set. Set one here; until then this page stays open.';
+                        loadLLM();
+                        return;
+                    }
+                    adminView.style.display = 'none';
+                    loginSection.style.display = '';
+                    var loginHint = document.getElementById('loginHint');
+                    var loginRow = document.getElementById('loginRow');
+                    if (d.password_set) {
+                        loginHint.textContent = 'Enter the admin password.';
+                        loginRow.style.display = '';
+                        return;
+                    }
+                    loginHint.textContent = 'No password is set. Opening the admin page.';
+                    loginRow.style.display = 'none';
+                    if (!openAttempt) {
+                        openAttempt = true;
+                        login();
                     }
                 })
                 .catch(function() {});
         }
 
-        function renderReviewState() {
-            var el = document.getElementById('reviewState');
-            el.textContent = reviewEnabled ? 'ON (review required)' : 'OFF (public, auto-index)';
-            el.style.color = reviewEnabled ? '#c62828' : '#2e7d32';
-        }
-
         function login() {
-            var key = document.getElementById('keyInput').value.trim();
+            var input = document.getElementById('passwordInput');
             var st = document.getElementById('loginStatus');
-            st.className = 'status'; st.textContent = 'Logging in...';
-            var fd = new FormData(); fd.append('key', key);
+            st.className = 'status'; st.textContent = 'Opening...';
+            var fd = new FormData(); fd.append('password', input.value.trim());
             fetch('/api/admin/login', { method: 'POST', body: fd })
                 .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
                 .then(function(res) {
-                    if (!res.ok) { st.className = 'status err'; st.textContent = res.data.error || 'Login failed'; return; }
-                    document.getElementById('keyInput').value = '';
+                    if (!res.ok) {
+                        openAttempt = false;
+                        st.className = 'status err';
+                        st.textContent = res.data.error || 'Login failed';
+                        document.getElementById('loginRow').style.display = '';
+                        return;
+                    }
+                    input.value = '';
                     st.textContent = '';
                     checkSession();
                 })
-                .catch(function() { st.className = 'status err'; st.textContent = 'Login failed'; });
+                .catch(function() { openAttempt = false; st.className = 'status err'; st.textContent = 'Login failed'; });
         }
 
         function logout() {
             fetch('/api/admin/logout', { method: 'POST' }).then(function() { checkSession(); });
         }
 
-        function saveKey() {
-            var input = document.getElementById('newKeyInput');
-            var st = document.getElementById('keyStatus');
-            var key = input.value.trim();
-            if (!key) { st.className = 'status err'; st.textContent = 'Enter a key'; return; }
+        function savePassword() {
+            var input = document.getElementById('newPasswordInput');
+            var st = document.getElementById('passwordStatus');
+            var password = input.value.trim();
+            if (!password) { st.className = 'status err'; st.textContent = 'Enter a password'; return; }
             st.className = 'status'; st.textContent = 'Saving...';
-            var fd = new FormData(); fd.append('key', key);
-            fetch('/api/admin/api-key', { method: 'POST', body: fd })
+            var fd = new FormData(); fd.append('password', password);
+            fetch('/api/admin/password', { method: 'POST', body: fd })
                 .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
                 .then(function(res) {
                     if (!res.ok) { st.className = 'status err'; st.textContent = res.data.error || 'Failed'; return; }
                     input.value = '';
                     st.className = 'status ok';
-                    st.textContent = 'Saved. Next login uses this key.';
+                    st.textContent = 'Saved. The next login must use this password.';
+                    document.getElementById('passwordHint').textContent = 'The next login must use the new password. This session stays signed in.';
                 })
                 .catch(function() { st.className = 'status err'; st.textContent = 'Failed'; });
         }
 
-        function toggleReview() {
-            var fd = new FormData(); fd.append('enabled', reviewEnabled ? 'false' : 'true');
-            fetch('/api/admin/review-mode', { method: 'POST', body: fd })
-                .then(function(r) { return r.json(); })
-                .then(function(d) { reviewEnabled = !!d.review_enabled; renderReviewState(); })
-                .catch(function() {});
+        function showProvider(name) {
+            ['academic', 'google', 'local'].forEach(function(p) {
+                document.getElementById('prov-' + p).classList.toggle('open', p === name);
+            });
+            var chosen = document.querySelector('input[name="provider"][value="' + name + '"]');
+            if (chosen) chosen.checked = true;
         }
 
-        function loadSubmissions() {
-            fetch('/api/admin/submissions?t=' + Date.now())
+        function loadLLM() {
+            fetch('/api/admin/llm?t=' + Date.now())
                 .then(function(r) { if (r.status === 401) { checkSession(); return null; } return r.json(); })
                 .then(function(d) {
-                    if (!d) return;
-                    var subs = d.submissions || [];
-                    document.getElementById('subCount').textContent = subs.length ? '(' + subs.length + ')' : '';
-                    var list = document.getElementById('subList');
-                    if (subs.length === 0) {
-                        list.innerHTML = '<div class="muted">No submissions awaiting review.</div>';
-                        return;
-                    }
-                    list.innerHTML = subs.map(function(s) {
-                        var url = GATEWAY + '/ipfs/' + encodeURIComponent(s.cid);
-                        var kindCls = s.kind === 'archive' ? 'kind-archive' : 'kind-document';
-                        return '<div class="sub-row"><div class="sub-main">' +
-                            '<div class="sub-cid"><a href="' + url + '" target="_blank">' + esc(s.cid) + '</a></div>' +
-                            '<span class="kind-tag ' + kindCls + '">' + esc(s.kind) + '</span>' +
-                            (s.owner ? ' <span class="muted">by ' + esc(s.owner) + '</span>' : '') +
-                            '</div>' +
-                            '<button class="btn btn-deny" onclick="decide(\'deny\', \'' + escJs(s.cid) + '\', this)">DENY</button>' +
-                            '<button class="btn btn-allow" onclick="decide(\'approve\', \'' + escJs(s.cid) + '\', this)">ALLOW</button>' +
-                            '</div>';
-                    }).join('');
+                    if (!d || d.error) return;
+                    showProvider(d.provider || 'academic');
+                    document.getElementById('academicModel').value = (d.academic && d.academic.model) || '';
+                    document.getElementById('googleModel').value = (d.google && d.google.model) || '';
+                    document.getElementById('localBase').value = (d.local && d.local.base) || '';
+                    document.getElementById('localModel').value = (d.local && d.local.model) || '';
+                    document.getElementById('academicKey').placeholder = (d.academic && d.academic.key_set) ? 'API key saved — leave blank to keep it' : 'API key';
+                    document.getElementById('googleKey').placeholder = (d.google && d.google.key_set) ? 'API key saved — leave blank to keep it' : 'API key';
+                    document.getElementById('localKey').placeholder = (d.local && d.local.key_set) ? 'API key saved — leave blank to keep it' : 'API key, if the server requires one';
                 })
                 .catch(function() {});
         }
 
-        function decide(action, cid, btn) {
-            var st = document.getElementById('subStatus');
-            var row = btn.parentNode;
-            row.querySelectorAll('button').forEach(function(b) { b.disabled = true; });
-            var fd = new FormData(); fd.append('cid', cid);
-            fetch('/api/admin/' + action, { method: 'POST', body: fd })
-                .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-                .then(function(res) {
-                    st.className = res.ok ? 'status ok' : 'status err';
-                    st.textContent = (res.data && (res.data.message || res.data.error)) || '';
-                    loadSubmissions();
-                })
-                .catch(function() { st.className = 'status err'; st.textContent = 'Action failed'; loadSubmissions(); });
-        }
-
-        function removeContent(kind, inputId) {
-            var input = document.getElementById(inputId);
-            var cid = input.value.trim();
-            var st = document.getElementById('delStatus');
-            if (!cid) return;
-            var fd = new FormData(); fd.append('cid', cid);
-            fetch('/api/admin/delete-' + kind, { method: 'POST', body: fd })
-                .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-                .then(function(res) {
-                    st.className = res.ok ? 'status ok' : 'status err';
-                    st.textContent = (res.data && (res.data.message || res.data.error)) || '';
-                    if (res.ok) input.value = '';
-                })
-                .catch(function() { st.className = 'status err'; st.textContent = 'Remove failed'; });
-        }
-
-        var currentFailures = [];
-
-        function loadFailures() {
-            fetch('/api/failures?t=' + Date.now())
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    currentFailures = data.failures || [];
-                    document.getElementById('failCount').textContent = currentFailures.length ? '(' + currentFailures.length + ')' : '';
-                    var list = document.getElementById('failList');
-                    if (currentFailures.length === 0) {
-                        list.innerHTML = '<div class="muted">No failed documents.</div>';
-                        return;
-                    }
-                    list.innerHTML = currentFailures.map(function(f) {
-                        var url = GATEWAY + '/ipfs/' + encodeURIComponent(f.cid);
-                        return '<div class="fail-row"><div class="fail-main">' +
-                            '<div class="fail-cid"><a href="' + url + '" target="_blank">' + esc(f.cid) + '</a></div>' +
-                            (f.reason ? '<div class="fail-reason">' + esc(f.reason) + '</div>' : '') +
-                            '</div><button class="btn btn-retry" onclick="retryDoc(\'' + escJs(f.cid) + '\', this)">RETRY</button></div>';
-                    }).join('');
-                })
-                .catch(function() {});
-        }
-
-        function retryDoc(cid, btn) {
-            if (btn) { btn.disabled = true; btn.textContent = '...'; }
+        function saveLLM() {
+            var st = document.getElementById('llmStatus');
+            var chosen = document.querySelector('input[name="provider"]:checked');
+            if (!chosen) { st.className = 'status err'; st.textContent = 'Choose a provider'; return; }
+            st.className = 'status'; st.textContent = 'Saving...';
             var fd = new FormData();
-            fd.append('cid', cid);
-            fetch('/api/retry', { method: 'POST', body: fd })
-                .then(function(r) { return r.json(); })
-                .then(function() { loadFailures(); })
-                .catch(function() { if (btn) { btn.disabled = false; btn.textContent = 'RETRY'; } });
+            fd.append('provider', chosen.value);
+            fd.append('academic_key', document.getElementById('academicKey').value.trim());
+            fd.append('academic_model', document.getElementById('academicModel').value.trim());
+            fd.append('google_key', document.getElementById('googleKey').value.trim());
+            fd.append('google_model', document.getElementById('googleModel').value.trim());
+            fd.append('local_base', document.getElementById('localBase').value.trim());
+            fd.append('local_model', document.getElementById('localModel').value.trim());
+            fd.append('local_key', document.getElementById('localKey').value.trim());
+            fetch('/api/admin/llm', { method: 'POST', body: fd })
+                .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+                .then(function(res) {
+                    if (!res.ok) { st.className = 'status err'; st.textContent = res.data.error || 'Failed'; return; }
+                    document.getElementById('academicKey').value = '';
+                    document.getElementById('googleKey').value = '';
+                    document.getElementById('localKey').value = '';
+                    st.className = 'status ok';
+                    st.textContent = 'Saved. Indexing now uses ' + (res.data.provider || chosen.value) + '.';
+                    loadLLM();
+                })
+                .catch(function() { st.className = 'status err'; st.textContent = 'Failed'; });
         }
 
-        document.getElementById('retryAllBtn').addEventListener('click', function() {
-            var btn = this;
-            btn.disabled = true;
-            var cids = currentFailures.map(function(f) { return f.cid; });
-            Promise.all(cids.map(function(c) {
-                var fd = new FormData(); fd.append('cid', c);
-                return fetch('/api/retry', { method: 'POST', body: fd }).catch(function() {});
-            })).then(function() { btn.disabled = false; loadFailures(); });
+        document.querySelectorAll('input[name="provider"]').forEach(function(el) {
+            el.addEventListener('change', function() { showProvider(el.value); });
         });
 
         document.getElementById('loginBtn').addEventListener('click', login);
-        document.getElementById('keyInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') login(); });
+        document.getElementById('passwordInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') login(); });
         document.getElementById('logoutBtn').addEventListener('click', logout);
-        document.getElementById('reviewToggle').addEventListener('click', toggleReview);
-        document.getElementById('saveKeyBtn').addEventListener('click', saveKey);
-        document.getElementById('newKeyInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') saveKey(); });
-        document.getElementById('refreshBtn').addEventListener('click', loadSubmissions);
-        document.getElementById('delArchiveBtn').addEventListener('click', function() { removeContent('archive', 'delArchiveCid'); });
-        document.getElementById('delDocBtn').addEventListener('click', function() { removeContent('document', 'delDocCid'); });
+        document.getElementById('savePasswordBtn').addEventListener('click', savePassword);
+        document.getElementById('newPasswordInput').addEventListener('keydown', function(e) { if (e.key === 'Enter') savePassword(); });
+        document.getElementById('saveLLMBtn').addEventListener('click', saveLLM);
 
         checkSession();
-        setInterval(function() { if (adminView.style.display !== 'none') { loadSubmissions(); loadFailures(); } }, 5000);
     </script>
 </body>
 </html>

@@ -1,6 +1,9 @@
 # Runtime state directory (DB, API key, archives, moderation state)
 data/
 
+# Local Kubo repo used to fetch datanetwork content
+.ipfs-datanetwork/
+
 # Secrets (also kept under data/ at runtime)
 .api_key
 .env

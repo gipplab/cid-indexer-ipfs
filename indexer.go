@@ -80,33 +80,30 @@ func (ix *Indexer) run() {
 }
 
 func (ix *Indexer) process(job indexJob) {
-	apiKey := loadAPIKey(ix.cfg.DataDir)
-	if apiKey == "" {
-		slog.Warn("skipping queued job, no API key configured", "kind", job.kind)
+	llm, err := resolveLLM(ix.store, ix.cfg)
+	if err != nil {
+		slog.Warn("skipping queued job, language model is not configured", "kind", job.kind, "error", err)
 		if job.kind == jobArchive {
-			ix.store.MarkArchiveFailed(job.cid, "no API key configured for indexing")
+			ix.store.MarkArchiveFailed(job.cid, err.Error())
 		}
 		return
 	}
 
 	switch job.kind {
 	case jobArchive:
-		indexArchive(ix.store, job.cid, job.owner, apiKey, ix.cfg)
+		indexArchive(ix.store, job.cid, job.owner, llm, ix.cfg)
 	case jobDocs:
 		pending := ix.store.Pending(job.docCIDs)
 		if len(pending) > 0 {
-			indexPending(ix.store, pending, apiKey, ix.cfg)
+			indexPending(ix.store, pending, llm, ix.cfg)
 		} else {
 			slog.Info("all queued document CIDs already indexed")
 		}
 	}
 }
 
-func indexPending(store *Store, pending []string, apiKey string, cfg PipelineConfig) {
+func indexPending(store *Store, pending []string, llm LLMConfig, cfg PipelineConfig) {
 	pipeline := &Pipeline{
-		APIKey:      apiKey,
-		APIBase:     cfg.APIBase,
-		Model:       cfg.Model,
 		Gateway:     cfg.Gateway,
 		IPFSAPI:     cfg.IPFSAPI,
 		Temperature: cfg.Temperature,
@@ -115,8 +112,9 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 		MaxTextLen:  cfg.MaxTextLen,
 		ConvertTO:   cfg.ConvertTO,
 	}
+	applyLLM(pipeline, llm)
 
-	slog.Info("indexing", "pending", len(pending), "workers", cfg.Workers, "model", cfg.Model)
+	slog.Info("indexing", "pending", len(pending), "workers", cfg.Workers, "provider", llm.Provider, "model", llm.Model)
 
 	work := make(chan string, cfg.Workers)
 	var wg sync.WaitGroup
@@ -126,7 +124,7 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 			defer wg.Done()
 			for cid := range work {
 				for {
-					entry, err := pipeline.Process(cid)
+					entry, err := pipeline.Process(cid, store.FileLabel(cid))
 					if err != nil {
 						if errors.Is(err, ErrRateLimited) {
 							slog.Warn("rate limited, retrying", "cid", cid, "error", err)
@@ -169,7 +167,7 @@ func indexPending(store *Store, pending []string, apiKey string, cfg PipelineCon
 
 // indexArchive crawls an archive CID, indexes its PDFs, and aggregates labels.
 // If the document list was persisted from a prior run, the crawl is skipped.
-func indexArchive(store *Store, archiveCID, owner, apiKey string, cfg PipelineConfig) {
+func indexArchive(store *Store, archiveCID, owner string, llm LLMConfig, cfg PipelineConfig) {
 	store.AddArchive(archiveCID, owner)
 
 	docCIDs := store.ArchiveDocCIDs(archiveCID)
@@ -197,7 +195,7 @@ func indexArchive(store *Store, archiveCID, owner, apiKey string, cfg PipelineCo
 		if len(pending) == 0 {
 			break
 		}
-		indexPending(store, pending, apiKey, cfg)
+		indexPending(store, pending, llm, cfg)
 	}
 
 	store.FinalizeArchive(archiveCID)

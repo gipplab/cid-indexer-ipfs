@@ -8,6 +8,7 @@ services:
     volumes:
       - ipfs-staging:/export
       - ipfs-data:/data/ipfs
+      - ./docker/ipfs-init:/container-init.d:ro
     environment:
       - IPFS_PROFILE=server
     healthcheck:
@@ -17,7 +18,8 @@ services:
       retries: 5
 
   cidindexer:
-    image: ghcr.io/gipplab/cid-indexer-ipfs:latest
+    build: .
+    image: cidindexer-ipfs:datanetwork
     restart: unless-stopped
     depends_on:
       ipfs:
@@ -25,10 +27,11 @@ services:
     ports:
       - "8384:8384"
     environment:
-      SAIA_API_KEY: "your-key-here"
+      SAIA_API_KEY: "${SAIA_API_KEY:-}"
     command:
       - "-o=/data"
       - "-ipfs-api=http://ipfs:5001"
+      - "-datanetwork=https://www.iosp.science/datanetwork"
     volumes:
       - cidindexer-data:/data
     labels:

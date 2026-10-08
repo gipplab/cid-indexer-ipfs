@@ -229,6 +229,27 @@ CREATE TABLE IF NOT EXISTS settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS network_datasets (
+    cid        TEXT PRIMARY KEY,
+    name       TEXT NOT NULL DEFAULT '',
+    clusters   TEXT NOT NULL DEFAULT '[]',
+    status     TEXT NOT NULL DEFAULT '',
+    error      TEXT NOT NULL DEFAULT '',
+    file_count INTEGER NOT NULL DEFAULT 0,
+    synced_at  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS network_files (
+    dataset_cid TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    name        TEXT NOT NULL DEFAULT '',
+    cid         TEXT NOT NULL,
+    size        INTEGER NOT NULL DEFAULT 0,
+    is_dir      INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (dataset_cid, path)
+);
+CREATE INDEX IF NOT EXISTS idx_network_files_cid ON network_files(cid);
 `)
 	return err
 }

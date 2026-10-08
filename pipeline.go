@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrRateLimited indicates a transient HTTP 429 that should be retried.
@@ -68,6 +70,7 @@ func isServerError(code int) bool { return code >= 500 && code <= 599 }
 
 // Pipeline fetches PDFs from IPFS, converts them to markdown, and extracts metadata via an LLM API.
 type Pipeline struct {
+	Provider    string
 	APIKey      string
 	APIBase     string
 	Model       string
@@ -210,29 +213,87 @@ func (p *Pipeline) initLimiters() {
 	})
 }
 
-// Process fetches a CID from IPFS, converts PDF to markdown, and extracts keywords.
-// Returns nil, nil for non-PDF content.
-func (p *Pipeline) Process(cid string) (*IndexEntry, error) {
+// Process fetches a CID from IPFS and extracts keywords from its contents.
+// PDFs go through the provider's document path. Text is sent as-is. Other
+// files are described by name, size, and content type.
+func (p *Pipeline) Process(cid, label string) (*IndexEntry, error) {
 	data, isPDF, err := p.fetchFromIPFS(cid)
 	if err != nil {
 		return nil, fmt.Errorf("fetch: %w", err)
 	}
-	if !isPDF {
-		slog.Debug("skipping non-PDF content", "cid", cid)
-		return nil, nil
+
+	if isPDF && p.Provider == llmGoogle {
+		result, err := p.extractGoogleFileWithRetry(data, "application/pdf", label, cid)
+		return p.finishExtract(cid, result, err)
+	}
+	if isPDF && p.Provider != llmLocal {
+		markdown, err := p.convertPDFWithRetry(data, cid)
+		if err != nil {
+			return nil, fmt.Errorf("convert: %w", err)
+		}
+		slog.Info("extracting keywords", "cid", cid, "markdown_len", len(markdown))
+		result, err := p.extractKeywordsWithRetry(withLabel(label, markdown), cid)
+		return p.finishExtract(cid, result, err)
 	}
 
-	markdown, err := p.convertPDFWithRetry(data, cid)
-	if err != nil {
-		return nil, fmt.Errorf("convert: %w", err)
+	if text, ok := asText(data); ok {
+		if p.maxText() > 0 && len(text) > p.maxText() {
+			text = text[:p.maxText()]
+		}
+		slog.Info("extracting keywords", "cid", cid, "text_len", len(text), "label", label)
+		result, err := p.extractKeywordsWithRetry(withLabel(label, text), cid)
+		return p.finishExtract(cid, result, err)
 	}
 
-	slog.Info("extracting keywords", "cid", cid, "markdown_len", len(markdown))
-	result, err := p.extractKeywordsWithRetry(markdown, cid)
+	mime := http.DetectContentType(data)
+	if p.Provider == llmGoogle && strings.HasPrefix(mime, "image/") {
+		result, err := p.extractGoogleFileWithRetry(data, mime, label, cid)
+		return p.finishExtract(cid, result, err)
+	}
+
+	slog.Info("extracting keywords from file description", "cid", cid, "label", label, "bytes", len(data), "type", mime)
+	note := fmt.Sprintf("Filename: %s\nSize: %d bytes\nContent type: %s\nThe bytes are not readable text. Infer the title and keywords from the filename, size, and content type.", labelOr(label, cid), len(data), mime)
+	result, err := p.extractKeywordsWithRetry(note, cid)
+	return p.finishExtract(cid, result, err)
+}
+
+func (p *Pipeline) finishExtract(cid string, result *extractionResult, err error) (*IndexEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("extract: %w", err)
 	}
+	return entryFrom(cid, result), nil
+}
 
+func withLabel(label, body string) string {
+	if label == "" {
+		return body
+	}
+	return "Filename: " + label + "\n\n" + body
+}
+
+func labelOr(label, cid string) string {
+	if label != "" {
+		return label
+	}
+	return cid
+}
+
+// asText reports whether data is readable text, and returns it.
+func asText(data []byte) (string, bool) {
+	if len(data) == 0 {
+		return "", true
+	}
+	sample := data
+	if len(sample) > 64*1024 {
+		sample = sample[:64*1024]
+	}
+	if bytes.Contains(sample, []byte{0}) || !utf8.Valid(sample) {
+		return "", false
+	}
+	return string(data), true
+}
+
+func entryFrom(cid string, result *extractionResult) *IndexEntry {
 	return &IndexEntry{
 		CID:        cid,
 		Title:      result.Title,
@@ -240,7 +301,7 @@ func (p *Pipeline) Process(cid string) (*IndexEntry, error) {
 		SubTopic:   result.SubTopic,
 		Keywords:   result.Keywords,
 		IndexedAt:  time.Now(),
-	}, nil
+	}
 }
 
 func (p *Pipeline) fetchFromIPFS(cid string) ([]byte, bool, error) {
@@ -381,6 +442,14 @@ func (p *Pipeline) convertPDF(pdfData []byte) (string, retryClass, time.Duration
 	return markdown, retryNone, 0, nil
 }
 
+func (p *Pipeline) chatURL() string {
+	base := strings.TrimRight(p.APIBase, "/")
+	if p.Provider == llmGoogle {
+		return base + "/openai/chat/completions"
+	}
+	return base + "/chat/completions"
+}
+
 func (p *Pipeline) maxText() int {
 	if p.MaxTextLen > 0 {
 		return p.MaxTextLen
@@ -393,6 +462,121 @@ func (p *Pipeline) convertTimeout() time.Duration {
 		return p.ConvertTO
 	}
 	return defaultConvertTimeout
+}
+
+func (p *Pipeline) extractGoogleFileWithRetry(data []byte, mime, label, cid string) (*extractionResult, error) {
+	p.initLimiters()
+	rateLimitTries, transientTries := 0, 0
+	for {
+		p.chatLimiter.acquire()
+		result, class, retryAfter, err := p.extractGoogleFile(data, mime, label)
+		if err == nil {
+			return result, nil
+		}
+		switch class {
+		case retryRateLimit:
+			if retryAfter > quotaPauseThreshold {
+				pause := capCooldown(retryAfter)
+				slog.Warn("extract quota exhausted, pausing pool until reset",
+					"cid", cid, "pause", pause.Round(time.Second),
+					"resume_at", time.Now().Add(pause).Format(time.RFC3339))
+				p.chatLimiter.penalize(pause)
+				continue
+			}
+			wait := backoffDuration(rateLimitTries, retryAfter)
+			rateLimitTries++
+			slog.Warn("rate limited on extract, backing off", "cid", cid, "attempt", rateLimitTries, "wait", wait)
+			p.chatLimiter.penalize(wait)
+			time.Sleep(wait)
+		case retryTransient:
+			if transientTries >= maxTransientRetries {
+				return nil, err
+			}
+			wait := backoffDuration(transientTries, 0)
+			slog.Warn("transient extract error, retrying", "cid", cid, "attempt", transientTries+1, "wait", wait, "error", err)
+			transientTries++
+			time.Sleep(wait)
+		default:
+			return nil, err
+		}
+	}
+}
+
+// extractGoogleFile sends a PDF or image to the Gemini API and parses the JSON answer.
+func (p *Pipeline) extractGoogleFile(data []byte, mime, label string) (*extractionResult, retryClass, time.Duration, error) {
+	payload := map[string]interface{}{
+		"contents": []map[string]interface{}{{
+			"parts": []map[string]interface{}{
+				{"text": keywordPrompt + withLabel(label, "The file is attached.")},
+				{"inlineData": map[string]string{
+					"mimeType": mime,
+					"data":     base64.StdEncoding.EncodeToString(data),
+				}},
+			},
+		}},
+		"generationConfig": map[string]interface{}{
+			"temperature":      p.Temperature,
+			"responseMimeType": "application/json",
+		},
+	}
+	bodyBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, retryNone, 0, fmt.Errorf("marshal request: %w", err)
+	}
+	endpoint := strings.TrimRight(p.APIBase, "/") + "/models/" + url.PathEscape(p.Model) + ":generateContent"
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, retryNone, 0, fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-goog-api-key", p.APIKey)
+
+	client := &http.Client{Timeout: llmTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, retryTransient, 0, fmt.Errorf("HTTP: %w", err)
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, retryTransient, 0, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests {
+		return nil, retryRateLimit, parseRetryAfter(resp), fmt.Errorf("rate limited (429)")
+	}
+	if isServerError(resp.StatusCode) {
+		return nil, retryTransient, 0, fmt.Errorf("API status %d: %s", resp.StatusCode, truncate(string(respBody), 200))
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, retryNone, 0, fmt.Errorf("API status %d: %s", resp.StatusCode, truncate(string(respBody), 200))
+	}
+	var parsed struct {
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return nil, retryNone, 0, fmt.Errorf("parse response: %w", err)
+	}
+	if parsed.Error != nil && parsed.Error.Message != "" {
+		return nil, retryNone, 0, fmt.Errorf("API error: %s", parsed.Error.Message)
+	}
+	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
+		return nil, retryTransient, 0, fmt.Errorf("empty LLM response")
+	}
+	content := strings.TrimSpace(parsed.Candidates[0].Content.Parts[0].Text)
+	if content == "" {
+		return nil, retryTransient, 0, fmt.Errorf("empty LLM response")
+	}
+	result, err := parseExtraction(content)
+	return result, retryNone, 0, err
 }
 
 func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionResult, error) {
@@ -436,19 +620,21 @@ func (p *Pipeline) extractKeywordsWithRetry(markdown, cid string) (*extractionRe
 // extractKeywords returns (result, retryClass, retryAfter, error).
 func (p *Pipeline) extractKeywords(markdown string) (*extractionResult, retryClass, time.Duration, error) {
 	temp := p.Temperature
-	// Disable thinking mode so max_tokens is spent on the JSON answer.
-	thinkingOff := false
 	reqBody := chatRequest{
 		Model: p.Model,
 		Messages: []chatMessage{{
 			Role:    "user",
 			Content: keywordPrompt + markdown,
 		}},
-		Temperature:        &temp,
-		MaxTokens:          1024,
-		ResponseFormat:     &responseFormat{Type: "json_object"},
-		EnableThinking:     &thinkingOff,
-		ChatTemplateKwargs: map[string]interface{}{"enable_thinking": false},
+		Temperature:    &temp,
+		MaxTokens:      1024,
+		ResponseFormat: &responseFormat{Type: "json_object"},
+	}
+	if p.Provider == "" || p.Provider == llmAcademic {
+		// Disable thinking mode so max_tokens is spent on the JSON answer.
+		thinkingOff := false
+		reqBody.EnableThinking = &thinkingOff
+		reqBody.ChatTemplateKwargs = map[string]interface{}{"enable_thinking": false}
 	}
 
 	bodyBytes, err := json.Marshal(reqBody)
@@ -456,12 +642,14 @@ func (p *Pipeline) extractKeywords(markdown string) (*extractionResult, retryCla
 		return nil, retryNone, 0, fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", p.APIBase+"/chat/completions", bytes.NewReader(bodyBytes))
+	req, err := http.NewRequest("POST", p.chatURL(), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, retryNone, 0, fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.APIKey)
+	if p.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.APIKey)
+	}
 
 	client := &http.Client{Timeout: llmTimeout}
 	resp, err := client.Do(req)

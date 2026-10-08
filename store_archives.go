@@ -105,7 +105,9 @@ func (s *Store) IndexedCID(cid string) bool {
 SELECT 1 FROM documents WHERE cid=?
 UNION SELECT 1 FROM archives WHERE cid=?
 UNION SELECT 1 FROM archive_docs WHERE doc_cid=?
-LIMIT 1`, cid, cid, cid).Scan(&n)
+UNION SELECT 1 FROM network_datasets WHERE cid=?
+UNION SELECT 1 FROM network_files WHERE cid=?
+LIMIT 1`, cid, cid, cid, cid, cid).Scan(&n)
 	return err == nil && n == 1
 }
 

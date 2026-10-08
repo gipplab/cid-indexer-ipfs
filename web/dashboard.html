@@ -34,7 +34,8 @@
         .tag-btn:hover { background: #ddd; border-color: #999; }
         .results { margin-top: 15px; }
         .results-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid #ddd; }
-        .result-item { display: flex; flex-direction: column; gap: 4px; padding: 12px 0; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        .result-item { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid #eee; font-size: 0.9em; }
+        .result-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
         .result-title { font-weight: 600; margin-bottom: 2px; text-decoration: none; color: inherit; display: block; cursor: pointer; }
         .result-title:hover { color: #06A77D; }
         .result-cid { font-family: monospace; word-break: break-all; color: #555; font-size: 0.85em; }
@@ -42,15 +43,6 @@
         .kw-tag { background: #e8f5e9; border: 1px solid #a5d6a7; padding: 1px 6px; font-size: 0.8em; border-radius: 2px; cursor: pointer; white-space: nowrap; flex: 0 0 auto; }
         .kw-tag:hover { background: #c8e6c9; }
         .class-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
-        .doc-arch { margin-top: 6px; font-size: 0.8em; }
-        .doc-arch-toggle { cursor: pointer; color: #1565c0; user-select: none; display: inline-flex; align-items: center; gap: 4px; }
-        .doc-arch-toggle:hover { text-decoration: underline; }
-        .doc-arch-toggle .tri { display: inline-block; transition: transform 0.1s; }
-        .doc-arch.open .doc-arch-toggle .tri { transform: rotate(90deg); }
-        .doc-arch-list { display: none; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-        .doc-arch.open .doc-arch-list { display: flex; }
-        .arch-chip { display: inline-flex; align-items: center; gap: 4px; background: #f5f5f5; border: 1px solid #ccc; padding: 1px 6px; font-size: 0.95em; cursor: pointer; }
-        .arch-chip:hover { background: #e8eef7; border-color: #1565c0; }
         .class-tag { padding: 1px 8px; font-size: 0.8em; border-radius: 2px; cursor: pointer; border: 1px solid; }
         .class-tag:hover { filter: brightness(0.92); }
         .field-tag { background: #e3f2fd; border-color: #90caf9; color: #1565c0; }
@@ -66,29 +58,28 @@
         .upload-status.err { color: #D00000; }
         .indexing-badge { display: inline-block; background: #06A77D; color: white; padding: 2px 8px; font-size: 0.75em; text-transform: uppercase; margin-left: 8px; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
-        .arch-grid { display: flex; flex-direction: column; gap: 10px; margin-top: 14px; }
         .arch-card { border: 1px solid #333; background: #fff; width: 100%; }
-        .arch-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; cursor: pointer; }
-        .arch-head:hover { background: #f7f7f7; }
-        .arch-chevron { color: #888; font-size: 0.8em; transition: transform 0.15s; }
-        .arch-card.open .arch-chevron { transform: rotate(90deg); }
+        .arch-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; }
         .arch-name { font-weight: 700; flex: 1; word-break: break-word; }
         .arch-head-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; font-size: 0.78em; color: #666; }
-        .arch-body { display: none; flex-direction: column; gap: 8px; padding: 0 12px 12px 12px; }
-        .arch-card.open .arch-body { display: flex; }
-        .arch-meta { font-size: 0.78em; color: #666; display: flex; flex-wrap: wrap; gap: 10px; }
+        .arch-body { display: flex; flex-direction: column; gap: 8px; padding: 0 12px 12px 12px; }
         .arch-cid { font-family: monospace; font-size: 0.75em; color: #888; word-break: break-all; }
-        .arch-kws { display: flex; flex-wrap: wrap; gap: 4px; }
-        .arch-actions { display: flex; gap: 6px; margin-top: 4px; }
+        .dn-note { font-size: 0.8em; color: #666; margin-top: 8px; }
+        .dn-note.err { color: #c62828; }
+        .dn-files { max-height: 420px; overflow: auto; margin-top: 8px; }
+        .dn-file { display: flex; gap: 12px; align-items: baseline; padding: 5px 0; border-bottom: 1px solid #eee; font-size: 0.85em; }
+        .dn-path { flex: 1; word-break: break-all; }
+        .dn-path a { color: inherit; text-decoration: none; }
+        .dn-path a:hover { color: #06A77D; }
+        .share-link { color: #1565c0; display: inline-flex; align-items: center; flex: 0 0 auto; margin-left: auto; }
+        .share-link:hover { color: #06A77D; }
+        .dn-size { color: #888; white-space: nowrap; }
         .status-badge { display: inline-block; padding: 1px 8px; font-size: 0.7em; text-transform: uppercase; border: 1px solid; border-radius: 2px; }
-        .status-done { background: #e8f5e9; border-color: #a5d6a7; color: #2e7d32; }
+        .status-done, .status-ready { background: #e8f5e9; border-color: #a5d6a7; color: #2e7d32; }
+        .status-pending { background: #eceff1; border-color: #b0bec5; color: #455a64; }
         .status-indexing, .status-crawling { background: #fff8e1; border-color: #ffe082; color: #f57f17; }
         .status-queued { background: #eceff1; border-color: #b0bec5; color: #455a64; }
         .status-failed { background: #ffebee; border-color: #ef9a9a; color: #c62828; }
-        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: none; align-items: flex-start; justify-content: center; z-index: 200; overflow-y: auto; padding: 30px 12px; }
-        .modal-overlay.open { display: flex; }
-        .modal-box { background: #fff; border: 1px solid #333; max-width: 900px; width: 100%; padding: 20px; }
-        .modal-hdr { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 1px solid #ddd; padding-bottom: 10px; margin-bottom: 10px; }
     </style>
 </head>
 <body>
@@ -102,7 +93,6 @@
             <div class="stat-card"><div class="stat-value" id="stat-indexed" style="color:#06A77D;">--</div><div class="stat-label">Indexed</div></div>
             <div class="stat-card"><div class="stat-value" id="stat-pending" style="color:#D00000;">--</div><div class="stat-label">Pending</div></div>
             <div class="stat-card"><div class="stat-value" id="stat-keywords">--</div><div class="stat-label">Unique Keywords</div></div>
-            <div class="stat-card"><div class="stat-value" id="stat-archives" style="color:#1565c0;">--</div><div class="stat-label">Archives</div></div>
         </div>
         <div class="section">
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -119,33 +109,17 @@
             <div id="resultsDiv" class="results" style="display:none;"></div>
         </div>
         <div class="section">
-            <div style="display:flex; justify-content:space-between; align-items:center;">
-                <h3 style="margin:0; text-transform:uppercase; font-size:1em;">Browse Archives</h3>
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:12px;">
+                <h3 style="margin:0; text-transform:uppercase; font-size:1em;">Datanetwork files</h3>
+                <span style="display:flex; align-items:center; gap:12px;">
+                    <span id="dnCount" style="font-size:0.78em; color:#666;"></span>
+                    <button class="btn" id="dnBrowseBtn" type="button">Browse all</button>
+                </span>
             </div>
-            <div class="search-row">
-                <div class="input-wrap">
-                    <input type="text" id="archSearch" placeholder="Filter archives by topic, keyword, or owner..." autocomplete="off">
-                </div>
-                <button class="btn btn-search" id="archSearchBtn">FILTER</button>
-            </div>
-            <div id="archGrid" class="arch-grid"></div>
-        </div>
-        <div class="section">
-            <h3 style="margin:0 0 6px 0; text-transform:uppercase; font-size:1em;">Add Document or Archive</h3>
-            <div style="font-size:0.8em; color:#888; margin-bottom:10px;">Paste a single PDF CID to index one document, or a collection/directory CID to crawl and label the whole archive.</div>
-            <div class="search-row" style="margin-top:0;">
-                <div class="input-wrap" style="flex:2;">
-                    <input type="text" id="cidInput" placeholder="Paste a CID (document or archive)..." autocomplete="off">
-                </div>
-                <div class="input-wrap" style="flex:1;">
-                    <input type="text" id="ownerInput" placeholder="Owner (optional)" autocomplete="off">
-                </div>
-                <button class="btn btn-search" id="cidAddBtn">SUBMIT</button>
-            </div>
-            <div id="cidAddStatus" class="upload-status"></div>
+            <div id="dnNote" class="dn-note">Reading the datanetwork…</div>
+            <div id="dnList"></div>
         </div>
     </div>
-    <div id="archModal" class="modal-overlay"><div class="modal-box" id="archModalBox"></div></div>
     <script>
         var GATEWAY = '{{.Gateway}}';
         var pageItems = [];
@@ -161,7 +135,6 @@
 
         function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
         function escJs(t) { return t ? t.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'\\"') : ''; }
-        function toggleDocArch(el) { el.parentNode.classList.toggle('open'); }
 
         function doSearch(query) {
             if (!query || !query.trim()) return;
@@ -215,21 +188,10 @@
                     classHtml += '</div>';
                 }
                 var kws = (r.keywords || []).map(function(k) { return '<span class="kw-tag" onclick="doSearch(\'' + escJs(k) + '\')">' + esc(k) + '</span>'; }).join('');
-                var refs = r.archive_refs || [];
-                var archHtml = '';
-                if (refs.length) {
-                    var chips = refs.map(function(a) {
-                        var label = a.name ? a.name : a.cid;
-                        var badge = a.status ? ' <span class="status-badge status-' + esc(a.status) + '">' + esc(a.status) + '</span>' : '';
-                        return '<span class="arch-chip" title="' + esc(a.cid) + '" onclick="openArchive(\'' + escJs(a.cid) + '\')">' + esc(label) + badge + '</span>';
-                    }).join('');
-                    archHtml = '<div class="doc-arch">' +
-                        '<span class="doc-arch-toggle" onclick="toggleDocArch(this)"><span class="tri">&#9656;</span> in ' + refs.length + ' archive' + (refs.length !== 1 ? 's' : '') + '</span>' +
-                        '<div class="doc-arch-list">' + chips + '</div></div>';
-                }
-                return '<div class="result-item">' + title + classHtml +
+                var share = shareLink(cidDisplay, false);
+                return '<div class="result-item"><div class="result-main">' + title + classHtml +
                     '<div class="result-cid">' + esc(cidDisplay) + '</div>' +
-                    '<div class="result-kws">' + kws + '</div>' + archHtml + '</div>';
+                    '<div class="result-kws">' + kws + '</div></div>' + share + '</div>';
             }).join('');
 
             if (totalPages > 1) {
@@ -340,7 +302,6 @@
                     document.getElementById('stat-indexed').textContent = data.indexed || 0;
                     document.getElementById('stat-pending').textContent = data.pending || 0;
                     document.getElementById('stat-keywords').textContent = data.unique_keywords || 0;
-                    document.getElementById('stat-archives').textContent = data.archives || 0;
                     var badge = document.getElementById('indexingBadge');
                     var queued = data.queued || 0;
                     badge.style.display = (data.indexing || queued > 0) ? '' : 'none';
@@ -360,187 +321,118 @@
             statsToggle.classList.toggle('open', open);
         });
 
-        var archGrid = document.getElementById('archGrid');
-        var archSearch = document.getElementById('archSearch');
-        var expandedArchives = {};
-
         function statusBadge(s) {
-            var cls = 'status-badge status-' + (s || 'crawling');
-            return '<span class="' + cls + '">' + esc(s || '') + '</span>';
+            if (!s || s === 'ready') return '';
+            return '<span class="status-badge status-' + s + '">' + esc(s) + '</span>';
         }
 
-        function archTitle(a) {
-            return (a.name && a.name !== a.cid) ? a.name : 'Untitled archive';
+        function fmtSize(n) {
+            n = Number(n) || 0;
+            if (n <= 0) return '';
+            var units = ['B', 'KB', 'MB', 'GB'];
+            var i = 0;
+            var v = n;
+            while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+            return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
         }
 
-        function renderArchives(archives) {
-            if (!archives || archives.length === 0) {
-                archGrid.innerHTML = '<p style="color:#999; font-size:0.9em;">No archives yet. Paste a collection CID below to index one.</p>';
+        var SHARE_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7a2.9 2.9 0 0 0 0-1.4l7.05-4.11A2.99 2.99 0 0 0 18 8.09c1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81A2.99 2.99 0 0 0 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>';
+
+        function pinataURL(cid, asDir) {
+            return 'https://gateway.pinata.cloud/ipfs/' + encodeURIComponent(cid) + (asDir ? '/' : '');
+        }
+
+        function shareLink(cid, asDir) {
+            if (!cid) return '';
+            return '<a class="share-link" href="' + pinataURL(cid, asDir) + '" target="_blank" rel="noopener" title="Open this CID on Pinata" aria-label="Open this CID on Pinata">' + SHARE_ICON + '</a>';
+        }
+
+        function fileURL(datasetCID, file) {
+            if (!file.path) return GATEWAY + '/ipfs/' + encodeURIComponent(file.cid);
+            var parts = file.path.split('/').map(function(seg) { return encodeURIComponent(seg); }).join('/');
+            return GATEWAY + '/ipfs/' + encodeURIComponent(datasetCID) + '/' + parts;
+        }
+
+        var dnBrowseOpen = false;
+        var dnData = null;
+
+        function toggleDatanetworkBrowse() {
+            dnBrowseOpen = !dnBrowseOpen;
+            if (dnData) renderDatanetwork(dnData);
+        }
+
+        function renderDatanetwork(data) {
+            dnData = data;
+            var note = document.getElementById('dnNote');
+            var list = document.getElementById('dnList');
+            var count = document.getElementById('dnCount');
+            var browseBtn = document.getElementById('dnBrowseBtn');
+            var datasets = data.datasets || [];
+            var nFiles = data.file_count || 0;
+            count.textContent = datasets.length + ' dataset' + (datasets.length === 1 ? '' : 's') + ', ' + nFiles + ' file' + (nFiles === 1 ? '' : 's');
+            browseBtn.textContent = dnBrowseOpen ? 'Hide' : 'Browse all';
+            note.className = 'dn-note' + (data.error ? ' err' : '');
+            if (data.syncing && datasets.length === 0) {
+                note.textContent = 'Reading the datanetwork…';
+            } else if (data.error) {
+                note.textContent = data.error;
+            } else if (data.syncing) {
+                note.textContent = 'Updating from the datanetwork.';
+            } else if (datasets.length === 0) {
+                note.textContent = 'No datanetwork datasets yet.';
+            } else if (!dnBrowseOpen) {
+                note.textContent = '';
+            } else {
+                note.textContent = '';
+            }
+            if (!dnBrowseOpen) {
+                list.innerHTML = '';
+                list.style.display = 'none';
                 return;
             }
-            archGrid.innerHTML = archives.map(function(a) {
-                var name = archTitle(a);
-                var fields = (a.broad_fields || []).slice(0, 3).map(function(f) {
-                    return '<span class="class-tag field-tag" onclick="filterArch(\'' + escJs(f.field) + '\')">' + esc(f.field) + ' (' + f.count + ')</span>';
+            list.style.display = '';
+            list.innerHTML = datasets.map(function(d) {
+                var clusters = (d.clusters || []).join(', ');
+                var files = d.files || [];
+                var body = files.map(function(f) {
+                    var label = f.path || f.name || f.cid;
+                    var href = fileURL(d.cid, f);
+                    var kind = f.dir ? 'dir' : 'file';
+                    return '<div class="dn-file"><div class="dn-path"><a href="' + href + '" target="_blank">' + esc(label) + '</a></div><span class="dn-size">' + kind + (f.size ? ' · ' + fmtSize(f.size) : '') + '</span>' + shareLink(f.cid, f.dir) + '</div>';
                 }).join('');
-                var kws = (a.top_keywords || []).slice(0, 6).map(function(k) {
-                    return '<span class="kw-tag" onclick="filterArch(\'' + escJs(k) + '\')">' + esc(k) + '</span>';
-                }).join('');
-                var meta = '<span>' + (a.indexed || 0) + '/' + (a.doc_count || 0) + ' docs</span>';
-                if (a.owner) meta += '<span>by ' + esc(a.owner) + '</span>';
-                meta += statusBadge(a.status);
-                var openCls = expandedArchives[a.cid] ? ' open' : '';
-                return '<div class="arch-card' + openCls + '">' +
-                    '<div class="arch-head" onclick="toggleArch(this, \'' + escJs(a.cid) + '\')">' +
-                        '<span class="arch-chevron">\u25B6</span>' +
-                        '<span class="arch-name">' + esc(name) + '</span>' +
-                        '<span class="arch-head-meta">' + meta + '</span>' +
+                if (!body) {
+                    body = '<p style="color:#999; font-size:0.85em; margin:8px 0 0;">' + (d.status === 'failed' ? 'Could not list this dataset.' : 'No files listed yet.') + '</p>';
+                }
+                var err = d.error ? '<div class="dn-note' + (d.status === 'failed' ? ' err' : '') + '">' + esc(d.error) + '</div>' : '';
+                var datasetIsDir = files.some(function(f) { return f.dir || f.path || f.cid !== d.cid; });
+                return '<div class="arch-card" style="margin-top:10px;">' +
+                    '<div class="arch-head">' +
+                        '<div class="arch-name">' + esc(d.name || d.cid) + '</div>' +
+                        '<div class="arch-head-meta">' + statusBadge(d.status) + (clusters ? '<span>' + esc(clusters) + '</span>' : '') + '<span>' + (d.file_count || 0) + ' files</span></div>' +
+                        shareLink(d.cid, datasetIsDir) +
                     '</div>' +
                     '<div class="arch-body">' +
-                        (fields ? '<div class="class-tags">' + fields + '</div>' : '') +
-                        (kws ? '<div class="arch-kws">' + kws + '</div>' : '') +
-                        '<div class="arch-cid">' + esc(a.cid) + '</div>' +
-                        '<div class="arch-actions">' +
-                            '<button class="btn" onclick="openArchive(\'' + escJs(a.cid) + '\')">DETAILS</button>' +
-                            '<button class="btn" onclick="replicate(\'' + escJs(a.cid) + '\')">REPLICATE</button>' +
-                            '<button class="btn" onclick="exportCids(\'' + escJs(a.cid) + '\')">EXPORT</button>' +
-                        '</div>' +
-                    '</div>' +
-                '</div>';
+                        '<div class="arch-cid">' + esc(d.cid) + '</div>' + err +
+                        '<div class="dn-files">' + body + '</div>' +
+                    '</div></div>';
             }).join('');
         }
 
-        function toggleArch(head, cid) {
-            var card = head.parentNode;
-            if (card.classList.toggle('open')) { expandedArchives[cid] = true; }
-            else { delete expandedArchives[cid]; }
-        }
-
-        function loadArchives() {
-            var q = archSearch.value.trim();
-            var url = q ? '/api/archives/search?q=' + encodeURIComponent(q) : '/api/archives';
-            fetch(url + (url.indexOf('?') > -1 ? '&' : '?') + 't=' + Date.now())
+        function loadDatanetwork() {
+            fetch('/api/datanetwork?t=' + Date.now())
                 .then(function(r) { return r.json(); })
-                .then(function(data) { renderArchives(data.archives || []); })
-                .catch(function() {});
+                .then(renderDatanetwork)
+                .catch(function() {
+                    document.getElementById('dnNote').textContent = 'Could not load the datanetwork catalog.';
+                });
         }
 
-        function filterArch(term) {
-            archSearch.value = term;
-            loadArchives();
-            archSearch.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-
-        function replicate(cid) {
-            var cmd = 'ipfs pin add ' + cid;
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                navigator.clipboard.writeText(cid).catch(function() {});
-            }
-            alert('Archive CID copied.\n\nTo replicate, pin it with your own IPFS node:\n\n' + cmd);
-        }
-
-        function exportCids(archiveCid) {
-            fetch('/api/archive?cid=' + encodeURIComponent(archiveCid) + '&t=' + Date.now())
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.error) { alert(data.error); return; }
-                    var cids = (data.archive && data.archive.doc_cids) || [];
-                    if (!cids.length && data.documents) {
-                        cids = data.documents.map(function(d) { return d.cid; }).filter(Boolean);
-                    }
-                    if (!cids.length) { alert('No document CIDs to export.'); return; }
-                    var blob = new Blob([cids.join('\n') + '\n'], { type: 'text/plain' });
-                    var a = document.createElement('a');
-                    a.href = URL.createObjectURL(blob);
-                    a.download = archiveCid + '-cids.txt';
-                    a.click();
-                    URL.revokeObjectURL(a.href);
-                })
-                .catch(function() { alert('Failed to export CIDs.'); });
-        }
-
-        document.getElementById('archSearchBtn').addEventListener('click', loadArchives);
-        archSearch.addEventListener('keydown', function(e) { if (e.key === 'Enter') loadArchives(); });
-
-        var archModal = document.getElementById('archModal');
-        var archModalBox = document.getElementById('archModalBox');
-
-        function closeArchive() { archModal.classList.remove('open'); }
-        archModal.addEventListener('click', function(e) { if (e.target === archModal) closeArchive(); });
-
-        function openArchive(cid) {
-            archModalBox.innerHTML = '<p style="color:#999;">Loading...</p>';
-            archModal.classList.add('open');
-            fetch('/api/archive?cid=' + encodeURIComponent(cid) + '&t=' + Date.now())
-                .then(function(r) { return r.json(); })
-                .then(function(data) {
-                    if (data.error) { archModalBox.innerHTML = '<p style="color:red;">' + esc(data.error) + '</p>'; return; }
-                    var a = data.archive || {};
-                    var docs = data.documents || [];
-                    var viewUrl = GATEWAY + '/ipfs/' + encodeURIComponent(a.cid);
-                    var html = '<div class="modal-hdr"><div><div style="font-weight:700; font-size:1.1em;">' + esc(archTitle(a)) + '</div>' +
-                        '<div class="arch-meta" style="margin-top:6px;">' + (a.indexed || 0) + '/' + (a.doc_count || 0) + ' docs' +
-                        (a.owner ? '<span>by ' + esc(a.owner) + '</span>' : '') + statusBadge(a.status) + '</div></div>' +
-                        '<button class="btn" onclick="closeArchive()">CLOSE</button></div>';
-                    html += '<div class="arch-cid" style="margin-bottom:8px;"><a href="' + viewUrl + '" target="_blank">' + esc(a.cid) + '</a></div>';
-                    if (a.error) html += '<div style="color:#c62828; font-size:0.85em; margin-bottom:8px;">' + esc(a.error) + '</div>';
-                    var kws = (a.top_keywords || []).map(function(k) { return '<span class="kw-tag" onclick="filterArch(\'' + escJs(k) + '\')">' + esc(k) + '</span>'; }).join('');
-                    if (kws) html += '<div class="arch-kws" style="margin-bottom:12px;">' + kws + '</div>';
-                    html += '<div style="margin-bottom:6px; text-transform:uppercase; font-size:0.85em; color:#555;">Documents</div>';
-                    html += docs.map(function(r) {
-                        var durl = GATEWAY + '/ipfs/' + encodeURIComponent(r.cid || '');
-                        var title = r.title ? '<a class="result-title" href="' + durl + '" target="_blank">' + esc(r.title) + '</a>' : esc(r.cid);
-                        var dkws = (r.keywords || []).map(function(k) { return '<span class="kw-tag">' + esc(k) + '</span>'; }).join('');
-                        return '<div class="result-item">' + title + '<div class="result-cid">' + esc(r.cid || '') + '</div><div class="result-kws">' + dkws + '</div></div>';
-                    }).join('');
-                    if (docs.length === 0) html += '<p style="color:#999; font-size:0.9em;">No indexed documents yet.</p>';
-                    archModalBox.innerHTML = html;
-                })
-                .catch(function() { archModalBox.innerHTML = '<p style="color:red;">Failed to load archive.</p>'; });
-        }
-
-        var cidInput = document.getElementById('cidInput');
-        var ownerInput = document.getElementById('ownerInput');
-        var cidAddBtn = document.getElementById('cidAddBtn');
-        var cidAddStatus = document.getElementById('cidAddStatus');
-
-        function submitCID() {
-            var cid = cidInput.value.trim();
-            if (!cid) return;
-            cidAddStatus.className = 'upload-status';
-            cidAddStatus.textContent = 'Submitting...';
-            var fd = new FormData();
-            fd.append('cid', cid);
-            fd.append('owner', ownerInput.value.trim());
-            fetch('/api/submit', { method: 'POST', body: fd })
-            .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-            .then(function(res) {
-                if (!res.ok) {
-                    cidAddStatus.className = 'upload-status err';
-                    cidAddStatus.textContent = res.data.error || 'Failed';
-                    return;
-                }
-                cidAddStatus.className = 'upload-status';
-                cidAddStatus.textContent = res.data.message || 'Submitted';
-                cidInput.value = '';
-                loadStats();
-                loadArchives();
-            })
-            .catch(function(e) {
-                cidAddStatus.className = 'upload-status err';
-                cidAddStatus.textContent = 'Failed: ' + e.message;
-            });
-        }
-
-        cidAddBtn.addEventListener('click', submitCID);
-        cidInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter') submitCID();
-        });
+        document.getElementById('dnBrowseBtn').addEventListener('click', toggleDatanetworkBrowse);
 
         loadRecent();
         loadStats();
-        loadArchives();
-        setInterval(function() { loadStats(); loadArchives(); }, 5000);
+        loadDatanetwork();
+        setInterval(function() { loadStats(); loadDatanetwork(); }, 5000);
     </script>
 </body>
 </html>

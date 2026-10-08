@@ -1,5 +1,6 @@
 # Secrets and local runtime state (never bake into the image)
 data/
+.ipfs-datanetwork/
 .api_key
 .env
 index.db

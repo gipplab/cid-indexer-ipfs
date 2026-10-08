@@ -68,32 +68,16 @@ the gateway-rendered listing; the crawl is bounded by `-max-depth` and
 
 ## Admin & moderation
 
-A separate admin interface is served at `/admin`. Log in with the server's
-configured API key (the same key used for indexing); on success the server
-issues an in-memory session cookie. Sessions are not persisted, so a server
-restart requires logging in again. The login submits the key over the local
-connection, so only expose the admin interface on a trusted network.
+A separate admin interface is served at `/admin`. Until a password is set,
+the page opens with no login. **Change password** stores `.admin_password`
+in the data directory; later visits must use it. Sessions are in memory, so
+a server restart requires signing in again. Only expose the admin interface
+on a trusted network.
 
-The admin can:
-
-- **Replace the API key.** Saves `.api_key` in the data directory. Indexing and
-  admin login both use that key from then on (it overrides `SAIA_API_KEY`).
-  The current session stays signed in; the next login must use the new key.
-- **Toggle review mode.** When review mode is OFF (the default), submitted CIDs
-  are classified and indexed immediately, as before. When it is ON, any user may
-  still submit a CID, but it is parked in a review queue (kept out of the
-  archives list and not indexed) until an admin decides.
-- **Approve / deny submissions.** The `/admin` page lists pending submissions,
-  each labeled as a **document** or an **archive** and linked to the gateway for
-  inspection. **Allow** queues it for indexing; **Deny** denylists the CID and
-  removes it from the queue. Denylisted CIDs are rejected on future submission.
-- **Remove content.** Remove an archive (its member documents that belong to no
-  other archive are deleted from the index; documents shared with another
-  archive are kept, only the membership link is dropped) or remove an individual
-  document from the index by CID.
-
-Moderation state is persisted across restarts in the index database: the
-pending review queue, the denied-CID denylist, and the review-mode setting.
+API keys are set in the language-model section, separate from the password:
+Academic Cloud, a Google AI Studio key, or a local OpenAI-compatible server.
+Datasets are not submitted here: the indexer reads them from the datanetwork
+readout.
 
 ## Build
 
@@ -225,6 +209,17 @@ through the UI, which classifies each one and queues it for indexing.
 | `-max-depth` | `8` | Max directory recursion depth when crawling an archive |
 | `-max-docs` | `5000` | Max documents to discover per archive crawl |
 | `-port` | `8384` | Web UI port |
+| `-datanetwork` | `https://www.iosp.science/datanetwork` | Public readout whose datasets are listed in the web UI. Empty disables the catalog. Requires `-ipfs-api`. |
+
+## Datanetwork catalog
+
+On startup the indexer reads the public IOSP datanetwork readout, then asks the
+local Kubo node (`-ipfs-api`) for every file inside each dataset. The node's
+peering list should include the consortium meeting points so those fetches
+resolve; `docker compose` configures that for the bundled Kubo. Every listed file is queued for keyword extraction when a language model
+is configured: text is sent as text, PDFs go through the provider's document
+path, and other files are described by name and type. The file
+list is at the top of the web UI and at `/api/datanetwork`.
 
 ## Web UI
 
@@ -233,11 +228,7 @@ through the UI, which classifies each one and queues it for indexing.
 - Clickable research field, sub-topic, and keyword tags
 - Paginated results (20 per page)
 - Recent searches
-- Browse archives grid (aggregated labels, owner, status) with topic filtering
-- Archive detail view listing the contained documents
-- Replicate action (copies the archive CID + shows a pin command)
-- Export action (downloads a newline-separated list of document CIDs)
-- Single CID paste field (auto-classified as document or archive)
+- Datanetwork file list (every dataset from the public readout, with its files)
 - Live indexing progress
 
 ## Storage

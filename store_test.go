@@ -185,6 +185,25 @@ func TestSaveAPIKeyOverridesEnv(t *testing.T) {
 	}
 }
 
+func TestAdminPasswordIsSeparateFromAPIKey(t *testing.T) {
+	dir := t.TempDir()
+	if loadAdminPassword(dir) != "" {
+		t.Fatal("a new data dir should have no admin password")
+	}
+	if err := saveAdminPassword(dir, "  "); err == nil {
+		t.Fatal("empty password should be rejected")
+	}
+	if err := saveAdminPassword(dir, "secret"); err != nil {
+		t.Fatal(err)
+	}
+	if loadAdminPassword(dir) != "secret" {
+		t.Fatal("password was not saved")
+	}
+	if loadAPIKey(dir) != "" {
+		t.Fatal("setting a password should not create an API key")
+	}
+}
+
 func TestIndexedIPFSRefusesUnknownCID(t *testing.T) {
 	s := newTestStore(t)
 	doc := "QmDocCID11111111111111111111111111111111111"
